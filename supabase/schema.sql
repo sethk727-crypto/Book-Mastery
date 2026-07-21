@@ -13,6 +13,23 @@
 create extension if not exists "pgcrypto"; -- gen_random_uuid()
 
 -- ----------------------------------------------------------------------------
+-- RESET — makes this file safe to re-run after a failed attempt.
+-- WARNING: drops and recreates all app tables. Fine on a fresh project;
+-- do NOT re-run once you have real data you want to keep.
+-- ----------------------------------------------------------------------------
+
+drop table if exists
+  habit_logs, habits, review_schedules, doctrine_rules, brain_dumps,
+  recall_prompts, schema_rewrites, comprehension_tests, rsvp_sessions, books
+  cascade;
+drop type if exists habit_day_status cascade;
+drop type if exists review_outcome cascade;
+drop type if exists rewrite_status cascade;
+drop type if exists book_status cascade;
+drop function if exists set_updated_at() cascade;
+drop function if exists set_window_closes_at() cascade;
+
+-- ----------------------------------------------------------------------------
 -- ENUMS
 -- ----------------------------------------------------------------------------
 
@@ -108,8 +125,10 @@ create table schema_rewrites (
 
   -- Step 3: Reconsolidation Window (T_window <= 5h)
   window_opened_at     timestamptz,
-  window_closes_at     timestamptz
-    generated always as (window_opened_at + interval '5 hours') stored,
+  -- Maintained by the trg_rewrites_window trigger below:
+  -- always window_opened_at + 5 hours. (A generated column can't be used
+  -- here — timestamptz + interval is not immutable in Postgres.)
+  window_closes_at     timestamptz,
   recall_reps_required smallint not null default 3,
   recall_reps_completed smallint not null default 0
     check (recall_reps_completed >= 0),
@@ -235,6 +254,22 @@ begin
   return new;
 end;
 $$;
+
+-- Keeps window_closes_at locked to window_opened_at + 5 hours.
+create or replace function set_window_closes_at()
+returns trigger language plpgsql as $$
+begin
+  if new.window_opened_at is null then
+    new.window_closes_at := null;
+  else
+    new.window_closes_at := new.window_opened_at + interval '5 hours';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger trg_rewrites_window before insert or update on schema_rewrites
+  for each row execute function set_window_closes_at();
 
 create trigger trg_books_updated          before update on books
   for each row execute function set_updated_at();
