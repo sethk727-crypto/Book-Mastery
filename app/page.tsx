@@ -7,10 +7,12 @@
 // ============================================================================
 
 import { useState } from "react";
-import { BookOpenText, Brain, Target } from "lucide-react";
+import Link from "next/link";
+import { BookOpenText, BookUp2, Brain, Sun, Target } from "lucide-react";
 import RSVPReader from "@/components/RSVPReader";
 import ReconsolidationStudio from "@/components/ReconsolidationStudio";
 import DoctrineQueue from "@/components/DoctrineQueue";
+import DailyLiturgy from "@/components/DailyLiturgy";
 import type {
   DoctrineRule,
   Habit,
@@ -119,12 +121,13 @@ const SAMPLE_HABIT_LOGS: HabitLog[] = [
   // day 7 was a single miss — tolerated, streak holds
 ];
 
-type Tab = "rsvp" | "reconsolidation" | "doctrine";
+type Tab = "rsvp" | "reconsolidation" | "doctrine" | "liturgy";
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof Brain }> = [
   { id: "rsvp", label: "RSVP Reader", icon: BookOpenText },
   { id: "reconsolidation", label: "Reconsolidation Studio", icon: Brain },
-  { id: "doctrine", label: "Doctrine Registry", icon: Target },
+  { id: "doctrine", label: "Living Doctrine", icon: Target },
+  { id: "liturgy", label: "Daily Liturgy", icon: Sun },
 ];
 
 export default function Home() {
@@ -138,6 +141,13 @@ export default function Home() {
         <p className="mt-1 text-sm text-neutral-400">
           Read fast → rewrite the schema → install the doctrine.
         </p>
+        <Link
+          href="/absorb"
+          className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-4 py-2 text-sm text-accent-soft transition hover:bg-accent/20"
+        >
+          <BookUp2 size={14} />
+          Start the absorption pipeline (upload a PDF)
+        </Link>
       </header>
 
       <nav className="mb-8 flex justify-center gap-2">
@@ -183,6 +193,23 @@ export default function Home() {
             />
           )}
         </div>
+      )}
+
+      {tab === "liturgy" && (
+        <DailyLiturgy
+          rules={SAMPLE_RULES}
+          schedules={SAMPLE_SCHEDULES}
+          habits={[SAMPLE_HABIT]}
+          habitLogs={SAMPLE_HABIT_LOGS}
+          onScheduleUpdate={(updated) => {
+            // TODO: upsert into review_schedules via lib/supabase.
+            console.info("Schedule updated:", updated);
+          }}
+          onHabitLog={(habitId, status) => {
+            // TODO: insert into habit_logs via lib/supabase.
+            console.info("Habit log:", habitId, status);
+          }}
+        />
       )}
 
       {tab === "doctrine" && (
