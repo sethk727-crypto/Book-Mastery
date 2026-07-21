@@ -6,9 +6,9 @@
 // Persists each stage to Supabase; requires a signed-in session.
 // ============================================================================
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, BookUp2, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, ArrowRight, BookUp2, CheckCircle2, LogIn } from "lucide-react";
 import PDFUploadDropzone from "@/components/PDFUploadDropzone";
 import SprintReader from "@/components/SprintReader";
 import RecallChamber from "@/components/RecallChamber";
@@ -25,9 +25,27 @@ type Stage =
 
 const STAGE_LABELS = ["Upload", "Sprint", "Recall", "Doctrine"] as const;
 
+type AuthGate = "checking" | "in" | "out" | "unconfigured";
+
 export default function AbsorbPage() {
   const [stage, setStage] = useState<Stage>({ name: "upload" });
   const [persistError, setPersistError] = useState<string | null>(null);
+  const [auth, setAuth] = useState<AuthGate>("checking");
+
+  useEffect(() => {
+    try {
+      const supabase = getSupabase();
+      void supabase.auth
+        .getSession()
+        .then(({ data: { session } }) => setAuth(session ? "in" : "out"));
+      const { data: sub } = supabase.auth.onAuthStateChange((_event, session) =>
+        setAuth(session ? "in" : "out")
+      );
+      return () => sub.subscription.unsubscribe();
+    } catch {
+      setAuth("unconfigured");
+    }
+  }, []);
 
   const stageIndex =
     stage.name === "upload" ? 0 : stage.name === "sprint" ? 1 : stage.name === "recall" ? 2 : 3;
@@ -158,7 +176,40 @@ export default function AbsorbPage() {
         </p>
       )}
 
-      {stage.name === "upload" && (
+      {stage.name === "upload" && auth === "checking" && (
+        <p className="text-center text-sm text-neutral-500">Checking your session…</p>
+      )}
+
+      {stage.name === "upload" && auth === "unconfigured" && (
+        <div className="mx-auto flex max-w-xl items-start gap-2 rounded-xl border border-amber-700/50 bg-amber-950/20 p-5 text-sm text-amber-200">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <span>
+            The database isn&apos;t connected yet, so uploads are disabled.
+            Create a free Supabase project, run the two files in{" "}
+            <code className="font-mono text-xs">supabase/</code>, and set the
+            three keys from <code className="font-mono text-xs">.env.example</code>{" "}
+            — full steps are in the README. The dashboard demo on the{" "}
+            <Link href="/" className="underline">home page</Link> works without it.
+          </span>
+        </div>
+      )}
+
+      {stage.name === "upload" && auth === "out" && (
+        <div className="mx-auto flex max-w-xl flex-col items-center gap-4 rounded-xl border border-neutral-800 bg-surface-raised p-8 text-center">
+          <p className="text-sm text-neutral-300">
+            Sign in first so your books and progress are saved to your account.
+          </p>
+          <Link
+            href="/login"
+            className="flex items-center gap-2 rounded-lg bg-accent px-6 py-3 text-sm font-medium text-white transition hover:bg-accent-soft"
+          >
+            <LogIn size={15} />
+            Sign in with email
+          </Link>
+        </div>
+      )}
+
+      {stage.name === "upload" && auth === "in" && (
         <PDFUploadDropzone
           onBookReady={(book) => setStage({ name: "sprint", book })}
         />
