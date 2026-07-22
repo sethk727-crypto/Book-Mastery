@@ -29,16 +29,24 @@ export interface SprintReaderProps {
   onSprintComplete?: (metrics: RSVPMetrics) => void;
   /** "Finish Book" pressed — lock the PDF and open the Recall Chamber. */
   onFinishBook: () => void;
+  /** Persist reading position (page turns / RSVP pauses) for resume. */
+  onProgress?: (progress: { pageIndex?: number; wordIndex?: number }) => void;
 }
 
 export default function SprintReader({
   book,
   onSprintComplete,
   onFinishBook,
+  onProgress,
 }: SprintReaderProps) {
   const [mode, setMode] = useState<"page" | "rsvp">("page");
-  const [pageIndex, setPageIndex] = useState(0);
+  const [pageIndex, setPageIndex] = useState(book.last_page_index ?? 0);
   const [confirmFinish, setConfirmFinish] = useState(false);
+
+  const goToPage = (next: number) => {
+    setPageIndex(next);
+    onProgress?.({ pageIndex: next });
+  };
 
   const paragraphs = useMemo(
     () =>
@@ -50,9 +58,10 @@ export default function SprintReader({
   );
 
   const pageCount = Math.max(1, Math.ceil(paragraphs.length / PARAGRAPHS_PER_PAGE));
+  const safePageIndex = Math.min(pageIndex, pageCount - 1);
   const page = paragraphs.slice(
-    pageIndex * PARAGRAPHS_PER_PAGE,
-    (pageIndex + 1) * PARAGRAPHS_PER_PAGE
+    safePageIndex * PARAGRAPHS_PER_PAGE,
+    (safePageIndex + 1) * PARAGRAPHS_PER_PAGE
   );
 
   // One suppressor for every annotation/exfiltration vector.
@@ -104,7 +113,9 @@ export default function SprintReader({
         <RSVPReader
           text={book.extracted_text}
           initialWPM={350}
+          startWordIndex={book.last_word_index ?? 0}
           onSprintComplete={onSprintComplete}
+          onPositionChange={(wordIndex) => onProgress?.({ wordIndex })}
         />
       ) : (
         <div
@@ -118,7 +129,7 @@ export default function SprintReader({
         >
           <AnimatePresence mode="wait">
             <motion.div
-              key={pageIndex}
+              key={safePageIndex}
               initial={{ opacity: 0, x: 12 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -12 }}
@@ -135,18 +146,18 @@ export default function SprintReader({
 
           <div className="mt-8 flex items-center justify-between border-t border-neutral-800 pt-4">
             <button
-              onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
-              disabled={pageIndex === 0}
+              onClick={() => goToPage(Math.max(0, safePageIndex - 1))}
+              disabled={safePageIndex === 0}
               className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-neutral-400 transition hover:bg-surface-overlay hover:text-white disabled:opacity-30"
             >
               <ArrowLeft size={15} /> Back
             </button>
             <span className="font-mono text-xs text-neutral-500">
-              {pageIndex + 1} / {pageCount}
+              {safePageIndex + 1} / {pageCount}
             </span>
             <button
-              onClick={() => setPageIndex((p) => Math.min(pageCount - 1, p + 1))}
-              disabled={pageIndex >= pageCount - 1}
+              onClick={() => goToPage(Math.min(pageCount - 1, safePageIndex + 1))}
+              disabled={safePageIndex >= pageCount - 1}
               className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-neutral-400 transition hover:bg-surface-overlay hover:text-white disabled:opacity-30"
             >
               Next <ArrowRight size={15} />

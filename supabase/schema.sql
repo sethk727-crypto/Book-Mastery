@@ -19,8 +19,9 @@ create extension if not exists "pgcrypto"; -- gen_random_uuid()
 -- ----------------------------------------------------------------------------
 
 drop table if exists
-  habit_logs, habits, review_schedules, doctrine_rules, brain_dumps,
-  recall_prompts, schema_rewrites, comprehension_tests, rsvp_sessions, books
+  push_subscriptions, habit_logs, habits, review_schedules, doctrine_rules,
+  brain_dumps, recall_prompts, schema_rewrites, comprehension_tests,
+  rsvp_sessions, books
   cascade;
 drop type if exists habit_day_status cascade;
 drop type if exists review_outcome cascade;
@@ -63,6 +64,9 @@ create table books (
   storage_path  text,                  -- Supabase Storage path of the raw PDF
   extracted_text text,                 -- full plain-text extraction
   word_count    integer not null default 0 check (word_count >= 0),
+  -- Reading-position resume
+  last_page_index integer not null default 0,
+  last_word_index integer not null default 0,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
@@ -244,6 +248,21 @@ create table habit_logs (
 create index idx_habit_logs_habit on habit_logs (habit_id, log_date);
 
 -- ----------------------------------------------------------------------------
+-- Browser push notifications
+-- ----------------------------------------------------------------------------
+
+create table push_subscriptions (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references auth.users (id) on delete cascade,
+  endpoint   text not null unique,
+  p256dh     text not null,
+  auth       text not null,
+  created_at timestamptz not null default now()
+);
+
+create index idx_push_subs_user on push_subscriptions (user_id);
+
+-- ----------------------------------------------------------------------------
 -- updated_at bookkeeping
 -- ----------------------------------------------------------------------------
 
@@ -292,6 +311,7 @@ alter table doctrine_rules      enable row level security;
 alter table review_schedules    enable row level security;
 alter table habits              enable row level security;
 alter table habit_logs          enable row level security;
+alter table push_subscriptions  enable row level security;
 
 create policy "own books"        on books
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
@@ -315,4 +335,6 @@ create policy "own schedules"    on review_schedules
 create policy "own habits"       on habits
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "own habit logs"   on habit_logs
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own push subscriptions" on push_subscriptions
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);

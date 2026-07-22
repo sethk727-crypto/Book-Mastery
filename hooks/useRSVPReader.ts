@@ -17,6 +17,8 @@ import type { RSVPMetrics } from "@/lib/types";
 export interface UseRSVPReaderOptions {
   initialWPM?: number;
   chunkSize?: 1 | 2 | 3;
+  /** Resume position: start playback at the frame containing this word. */
+  startWordIndex?: number;
   onComplete?: (metrics: RSVPMetrics) => void;
 }
 
@@ -47,6 +49,7 @@ export function useRSVPReader(
   {
     initialWPM = 300,
     chunkSize: initialChunkSize = 1,
+    startWordIndex = 0,
     onComplete,
   }: UseRSVPReaderOptions = {}
 ): UseRSVPReaderReturn {
@@ -233,17 +236,26 @@ export function useRSVPReader(
   );
 
   // Reset when the source text changes; clean up the loop on unmount.
+  // Resume: start at the frame containing startWordIndex.
   useEffect(() => {
-    indexRef.current = 0;
+    let resumeIndex = 0;
+    if (startWordIndex > 0) {
+      resumeIndex = tokens.findIndex(
+        (t) => t.startWordIndex + t.wordCount > startWordIndex
+      );
+      if (resumeIndex < 0) resumeIndex = 0;
+    }
+    indexRef.current = resumeIndex;
     frameElapsedRef.current = 0;
     activeMsRef.current = 0;
     wordsConsumedRef.current = 0;
     playingRef.current = false;
-    setTokenIndex(0);
+    setTokenIndex(resumeIndex);
     setIsPlaying(false);
     setIsComplete(false);
     return stopLoop;
-  }, [text, stopLoop]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text, tokens, stopLoop]);
 
   return {
     token: tokens[tokenIndex] ?? null,

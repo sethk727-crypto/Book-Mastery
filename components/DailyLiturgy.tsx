@@ -8,6 +8,7 @@
 
 import { useMemo } from "react";
 import { CalendarCheck2, CheckCircle2, Flame, MinusCircle, Sun } from "lucide-react";
+import EnableNotifications from "@/components/EnableNotifications";
 import HabitHorizonRing from "@/components/HabitHorizonRing";
 import MaskedReviewCard from "@/components/MaskedReviewCard";
 import { dueQueue } from "@/lib/spacedRepetition";
@@ -56,16 +57,19 @@ export default function DailyLiturgy({
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
-      <header className="flex items-center gap-3">
-        <Sun size={22} className="text-amber-400" />
-        <div>
-          <h2 className="text-lg font-semibold text-white">Daily Liturgy</h2>
-          <p className="text-sm text-neutral-400">
-            {dueCount} rule{dueCount !== 1 && "s"} due for retrieval ·{" "}
-            {activeHabits.length} habit{activeHabits.length !== 1 && "s"} on the
-            66-day horizon
-          </p>
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Sun size={22} className="text-amber-400" />
+          <div>
+            <h2 className="text-lg font-semibold text-white">Daily Liturgy</h2>
+            <p className="text-sm text-neutral-400">
+              {dueCount} rule{dueCount !== 1 && "s"} due for retrieval ·{" "}
+              {activeHabits.length} habit{activeHabits.length !== 1 && "s"} on the
+              66-day horizon
+            </p>
+          </div>
         </div>
+        <EnableNotifications />
       </header>
 
       {/* -------------------------------------------- Review queue */}
