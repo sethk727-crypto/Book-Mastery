@@ -6,16 +6,18 @@
 // in supabase/schema.sql is applied.
 // ============================================================================
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { BookOpenText, BookUp2, Brain, Sun, Target } from "lucide-react";
 import RSVPReader from "@/components/RSVPReader";
 import ReconsolidationStudio from "@/components/ReconsolidationStudio";
 import DoctrineQueue from "@/components/DoctrineQueue";
 import DailyLiturgy from "@/components/DailyLiturgy";
+import { getSupabase } from "@/lib/supabase";
 import type {
   DoctrineRule,
   Habit,
+  HabitDayStatus,
   HabitLog,
   ReviewSchedule,
   SchemaRewrite,
@@ -130,9 +132,144 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof Brain }> = [
   { id: "liturgy", label: "Daily Liturgy", icon: Sun },
 ];
 
+type DataMode = "loading" | "demo" | "live";
+
 export default function Home() {
   const [tab, setTab] = useState<Tab>("rsvp");
   const [studioOpen, setStudioOpen] = useState(false);
+  const [mode, setMode] = useState<DataMode>("loading");
+  const [rules, setRules] = useState<DoctrineRule[]>(SAMPLE_RULES);
+  const [schedules, setSchedules] = useState<ReviewSchedule[]>(SAMPLE_SCHEDULES);
+  const [habits, setHabits] = useState<Habit[]>([SAMPLE_HABIT]);
+  const [habitLogs, setHabitLogs] = useState<HabitLog[]>(SAMPLE_HABIT_LOGS);
+
+  // Load the signed-in user's real doctrine; fall back to demo data.
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const supabase = getSupabase();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!session) {
+          if (!cancelled) setMode("demo");
+          return;
+        }
+        const [rulesRes, schedulesRes, habitsRes, logsRes] = await Promise.all([
+          supabase.from("doctrine_rules").select("*"),
+          supabase.from("review_schedules").select("*"),
+          supabase.from("habits").select("*"),
+          supabase.from("habit_logs").select("*"),
+        ]);
+        if (cancelled) return;
+        setRules((rulesRes.data as DoctrineRule[] | null) ?? []);
+        setSchedules((schedulesRes.data as ReviewSchedule[] | null) ?? []);
+        setHabits((habitsRes.data as Habit[] | null) ?? []);
+        setHabitLogs((logsRes.data as HabitLog[] | null) ?? []);
+        setMode("live");
+      } catch {
+        if (!cancelled) setMode("demo");
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleScheduleUpdate = useCallback(
+    (updated: ReviewSchedule) => {
+      setSchedules((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      if (mode !== "live") return;
+      void getSupabase()
+        .from("review_schedules")
+        .update({
+          stage: updated.stage,
+          next_review_at: updated.next_review_at,
+          last_outcome: updated.last_outcome,
+          last_reviewed_at: updated.last_reviewed_at,
+          total_reviews: updated.total_reviews,
+          total_lapses: updated.total_lapses,
+        })
+        .eq("id", updated.id)
+        .then(({ error }) => {
+          if (error) console.error("Failed to save review:", error.message);
+        });
+    },
+    [mode]
+  );
+
+  const handleHabitLog = useCallback(
+    (habitId: string, status: HabitDayStatus) => {
+      const today = new Date().toISOString().slice(0, 10);
+      setHabitLogs((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          habit_id: habitId,
+          user_id: "",
+          log_date: today,
+          status,
+          note: null,
+        },
+      ]);
+      if (mode !== "live") return;
+      void (async () => {
+        const supabase = getSupabase();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+        const { error } = await supabase.from("habit_logs").insert({
+          habit_id: habitId,
+          user_id: user.id,
+          log_date: today,
+          status,
+        });
+        if (error) console.error("Failed to log habit:", error.message);
+      })();
+    },
+    [mode]
+  );
+
+  const handleStartHabit = useCallback(
+    (ruleId: string) => {
+      if (mode !== "live") {
+        setHabits((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            user_id: "demo-user",
+            doctrine_rule_id: ruleId,
+            started_on: new Date().toISOString().slice(0, 10),
+            horizon_days: 66,
+            completed_at: null,
+            abandoned_at: null,
+          },
+        ]);
+        return;
+      }
+      void (async () => {
+        const supabase = getSupabase();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data, error } = await supabase
+          .from("habits")
+          .insert({ user_id: user.id, doctrine_rule_id: ruleId })
+          .select("*")
+          .single<Habit>();
+        if (error || !data) {
+          console.error("Failed to start habit:", error?.message);
+          return;
+        }
+        setHabits((prev) => [...prev, data]);
+      })();
+    },
+    [mode]
+  );
 
   return (
     <main className="mx-auto min-h-screen max-w-5xl px-4 py-10">
@@ -148,6 +285,15 @@ export default function Home() {
           <BookUp2 size={14} />
           Start the absorption pipeline (upload a PDF)
         </Link>
+        {mode === "demo" && (
+          <p className="mt-3 text-xs text-neutral-600">
+            Showing demo data —{" "}
+            <Link href="/login" className="underline hover:text-neutral-400">
+              sign in
+            </Link>{" "}
+            to see your own rules and habits.
+          </p>
+        )}
       </header>
 
       <nav className="mb-8 flex justify-center gap-2">
@@ -197,31 +343,23 @@ export default function Home() {
 
       {tab === "liturgy" && (
         <DailyLiturgy
-          rules={SAMPLE_RULES}
-          schedules={SAMPLE_SCHEDULES}
-          habits={[SAMPLE_HABIT]}
-          habitLogs={SAMPLE_HABIT_LOGS}
-          onScheduleUpdate={(updated) => {
-            // TODO: upsert into review_schedules via lib/supabase.
-            console.info("Schedule updated:", updated);
-          }}
-          onHabitLog={(habitId, status) => {
-            // TODO: insert into habit_logs via lib/supabase.
-            console.info("Habit log:", habitId, status);
-          }}
+          rules={rules}
+          schedules={schedules}
+          habits={habits}
+          habitLogs={habitLogs}
+          onScheduleUpdate={handleScheduleUpdate}
+          onHabitLog={handleHabitLog}
         />
       )}
 
       {tab === "doctrine" && (
         <DoctrineQueue
-          rules={SAMPLE_RULES}
-          schedules={SAMPLE_SCHEDULES}
-          habits={[SAMPLE_HABIT]}
-          habitLogs={SAMPLE_HABIT_LOGS}
-          onScheduleUpdate={(updated) => {
-            // TODO: upsert into review_schedules via lib/supabase.
-            console.info("Schedule updated:", updated);
-          }}
+          rules={rules}
+          schedules={schedules}
+          habits={habits}
+          habitLogs={habitLogs}
+          onScheduleUpdate={handleScheduleUpdate}
+          onStartHabit={handleStartHabit}
         />
       )}
     </main>
