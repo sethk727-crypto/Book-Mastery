@@ -22,6 +22,7 @@ import PDFUploadDropzone from "@/components/PDFUploadDropzone";
 import SprintReader from "@/components/SprintReader";
 import RecallChamber from "@/components/RecallChamber";
 import RuleStudio, { type DraftRule } from "@/components/RuleStudio";
+import ComprehensionQuiz from "@/components/ComprehensionQuiz";
 import { getSupabase } from "@/lib/supabase";
 import { initialSchedule } from "@/lib/spacedRepetition";
 import type { Book, BrainDump, RSVPMetrics } from "@/lib/types";
@@ -41,6 +42,12 @@ function AbsorbFlow() {
   const [persistError, setPersistError] = useState<string | null>(null);
   const [auth, setAuth] = useState<AuthGate>("checking");
   const [openingBook, setOpeningBook] = useState(false);
+  const [quiz, setQuiz] = useState<{
+    bookId: string;
+    startWord: number;
+    endWord: number;
+    sessionId: string | null;
+  } | null>(null);
   const searchParams = useSearchParams();
   const bookParam = searchParams.get("book");
   const openedBookRef = useRef<string | null>(null);
@@ -84,27 +91,58 @@ function AbsorbFlow() {
   const stageIndex =
     stage.name === "upload" ? 0 : stage.name === "sprint" ? 1 : stage.name === "recall" ? 2 : 3;
 
-  // ---- Stage 1 -> 2: sprint metrics --------------------------------------
+  // ---- Stage 1 -> 2: sprint metrics + comprehension quiz -------------------
   const persistSprint = useCallback(async (book: Book, metrics: RSVPMetrics) => {
+    const startWord = book.last_word_index ?? 0;
+    const endWord = startWord + metrics.wordsConsumed;
+    let sessionId: string | null = null;
     try {
       const supabase = getSupabase();
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) return;
-      await supabase.from("rsvp_sessions").insert({
-        user_id: user.id,
-        book_id: book.id,
-        ended_at: new Date().toISOString(),
-        words_consumed: metrics.wordsConsumed,
-        active_ms: metrics.activeMs,
-        avg_wpm: metrics.effectiveWPM,
-        peak_wpm: metrics.peakWPM,
-      });
+      if (user) {
+        const { data } = await supabase
+          .from("rsvp_sessions")
+          .insert({
+            user_id: user.id,
+            book_id: book.id,
+            ended_at: new Date().toISOString(),
+            start_word_index: startWord,
+            end_word_index: endWord,
+            words_consumed: metrics.wordsConsumed,
+            active_ms: metrics.activeMs,
+            avg_wpm: metrics.effectiveWPM,
+            peak_wpm: metrics.peakWPM,
+          })
+          .select("id")
+          .single<{ id: string }>();
+        sessionId = data?.id ?? null;
+      }
     } catch (err) {
       setPersistError(err instanceof Error ? err.message : "Failed to save sprint");
     }
+    setQuiz({ bookId: book.id, startWord, endWord, sessionId });
   }, []);
+
+  // ---- Resume position persistence ----------------------------------------
+  const saveProgress = useCallback(
+    (book: Book, progress: { pageIndex?: number; wordIndex?: number }) => {
+      const patch: Record<string, number> = {};
+      if (progress.pageIndex !== undefined) patch.last_page_index = progress.pageIndex;
+      if (progress.wordIndex !== undefined) patch.last_word_index = progress.wordIndex;
+      if (Object.keys(patch).length === 0) return;
+      try {
+        void getSupabase().from("books").update(patch).eq("id", book.id)
+          .then(({ error }) => {
+            if (error) console.error("Failed to save position:", error.message);
+          });
+      } catch {
+        // unconfigured — resume simply won't persist
+      }
+    },
+    []
+  );
 
   // ---- Stage 2 -> 3: brain dump ------------------------------------------
   const persistDump = useCallback(
@@ -278,8 +316,19 @@ function AbsorbFlow() {
             book={stage.book}
             onSprintComplete={(metrics) => void persistSprint(stage.book, metrics)}
             onFinishBook={() => setStage({ name: "recall", book: stage.book })}
+            onProgress={(progress) => saveProgress(stage.book, progress)}
           />
         </div>
+      )}
+
+      {quiz && (
+        <ComprehensionQuiz
+          bookId={quiz.bookId}
+          startWord={quiz.startWord}
+          endWord={quiz.endWord}
+          rsvpSessionId={quiz.sessionId}
+          onClose={() => setQuiz(null)}
+        />
       )}
 
       {stage.name === "recall" && (

@@ -28,8 +28,12 @@ export interface RSVPReaderProps {
   /** Plain text extracted from the uploaded PDF. */
   text: string;
   initialWPM?: number;
+  /** Resume: start at the frame containing this word index. */
+  startWordIndex?: number;
   /** Persist sprint metrics (e.g. insert into rsvp_sessions) on completion. */
   onSprintComplete?: (metrics: RSVPMetrics) => void;
+  /** Fires on pause/completion with the reader's current absolute word index. */
+  onPositionChange?: (wordIndex: number) => void;
 }
 
 /** Renders a frame with its ORP character fixed at the horizontal center. */
@@ -57,12 +61,24 @@ function formatDuration(ms: number): string {
 export default function RSVPReader({
   text,
   initialWPM = 300,
+  startWordIndex = 0,
   onSprintComplete,
+  onPositionChange,
 }: RSVPReaderProps) {
   const reader = useRSVPReader(text, {
     initialWPM,
+    startWordIndex,
     onComplete: onSprintComplete,
   });
+
+  // Report the absolute word position whenever playback stops.
+  const { token: currentToken, isPlaying: playing } = reader;
+  useEffect(() => {
+    if (!playing && currentToken && onPositionChange) {
+      onPositionChange(currentToken.startWordIndex);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing]);
 
   const {
     token,

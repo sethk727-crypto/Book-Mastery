@@ -19,8 +19,17 @@ export interface Book {
   storage_path: string | null;
   extracted_text: string | null;
   word_count: number;
+  last_page_index: number;
+  last_word_index: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface QuizQuestion {
+  question: string;
+  options: string[];
+  correct_index: number;
+  explanation: string;
 }
 
 export interface RSVPSessionRecord {
