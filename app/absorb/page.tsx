@@ -6,9 +6,18 @@
 // Persists each stage to Supabase; requires a signed-in session.
 // ============================================================================
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, BookUp2, CheckCircle2, LogIn } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  BookUp2,
+  CheckCircle2,
+  Loader2,
+  LogIn,
+} from "lucide-react";
 import PDFUploadDropzone from "@/components/PDFUploadDropzone";
 import SprintReader from "@/components/SprintReader";
 import RecallChamber from "@/components/RecallChamber";
@@ -27,10 +36,14 @@ const STAGE_LABELS = ["Upload", "Sprint", "Recall", "Doctrine"] as const;
 
 type AuthGate = "checking" | "in" | "out" | "unconfigured";
 
-export default function AbsorbPage() {
+function AbsorbFlow() {
   const [stage, setStage] = useState<Stage>({ name: "upload" });
   const [persistError, setPersistError] = useState<string | null>(null);
   const [auth, setAuth] = useState<AuthGate>("checking");
+  const [openingBook, setOpeningBook] = useState(false);
+  const searchParams = useSearchParams();
+  const bookParam = searchParams.get("book");
+  const openedBookRef = useRef<string | null>(null);
 
   useEffect(() => {
     try {
@@ -46,6 +59,27 @@ export default function AbsorbPage() {
       setAuth("unconfigured");
     }
   }, []);
+
+  // Reopen a book from the Library (?book=<id>) straight into the sprint.
+  useEffect(() => {
+    if (!bookParam || auth !== "in") return;
+    if (openedBookRef.current === bookParam) return;
+    openedBookRef.current = bookParam;
+    setOpeningBook(true);
+    void getSupabase()
+      .from("books")
+      .select("*")
+      .eq("id", bookParam)
+      .single<Book>()
+      .then(({ data }) => {
+        if (data?.extracted_text) setStage({ name: "sprint", book: data });
+        else setPersistError("That book has no extracted text — try re-uploading it.");
+      })
+      .then(
+        () => setOpeningBook(false),
+        () => setOpeningBook(false)
+      );
+  }, [bookParam, auth]);
 
   const stageIndex =
     stage.name === "upload" ? 0 : stage.name === "sprint" ? 1 : stage.name === "recall" ? 2 : 3;
@@ -209,18 +243,43 @@ export default function AbsorbPage() {
         </div>
       )}
 
-      {stage.name === "upload" && auth === "in" && (
-        <PDFUploadDropzone
-          onBookReady={(book) => setStage({ name: "sprint", book })}
-        />
+      {stage.name === "upload" && auth === "in" && openingBook && (
+        <p className="flex items-center justify-center gap-2 py-10 text-sm text-neutral-500">
+          <Loader2 size={15} className="animate-spin" /> Opening your book…
+        </p>
+      )}
+
+      {stage.name === "upload" && auth === "in" && !openingBook && (
+        <div className="flex flex-col gap-4">
+          <PDFUploadDropzone
+            onBookReady={(book) => setStage({ name: "sprint", book })}
+          />
+          <p className="text-center text-sm text-neutral-500">
+            Already uploaded a book?{" "}
+            <Link href="/library" className="text-accent-soft underline">
+              Open it from your Library
+            </Link>
+          </p>
+        </div>
       )}
 
       {stage.name === "sprint" && (
-        <SprintReader
-          book={stage.book}
-          onSprintComplete={(metrics) => void persistSprint(stage.book, metrics)}
-          onFinishBook={() => setStage({ name: "recall", book: stage.book })}
-        />
+        <div className="flex flex-col gap-3">
+          <button
+            onClick={() => {
+              openedBookRef.current = null;
+              setStage({ name: "upload" });
+            }}
+            className="flex w-fit items-center gap-1.5 text-sm text-neutral-500 transition hover:text-white"
+          >
+            <ArrowLeft size={14} /> Back to upload / library
+          </button>
+          <SprintReader
+            book={stage.book}
+            onSprintComplete={(metrics) => void persistSprint(stage.book, metrics)}
+            onFinishBook={() => setStage({ name: "recall", book: stage.book })}
+          />
+        </div>
       )}
 
       {stage.name === "recall" && (
@@ -250,5 +309,19 @@ export default function AbsorbPage() {
         </div>
       )}
     </main>
+  );
+}
+
+export default function AbsorbPage() {
+  return (
+    <Suspense
+      fallback={
+        <p className="flex items-center justify-center gap-2 py-20 text-sm text-neutral-500">
+          <Loader2 size={15} className="animate-spin" /> Loading…
+        </p>
+      }
+    >
+      <AbsorbFlow />
+    </Suspense>
   );
 }

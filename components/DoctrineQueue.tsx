@@ -10,6 +10,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Brain,
   ChevronDown,
+  Flame,
   MessageSquareWarning,
   Target,
   Zap,
@@ -25,6 +26,8 @@ export interface DoctrineQueueProps {
   habitLogs?: HabitLog[];
   /** Persist an updated review schedule after grading. */
   onScheduleUpdate?: (updated: ReviewSchedule) => void;
+  /** Promote a rule to a 66-day habit (insert into habits). */
+  onStartHabit?: (ruleId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -37,6 +40,7 @@ export default function DoctrineQueue({
   habits = [],
   habitLogs = [],
   onScheduleUpdate,
+  onStartHabit,
 }: DoctrineQueueProps) {
   const [openCue, setOpenCue] = useState<string | null>(null);
 
@@ -159,11 +163,21 @@ export default function DoctrineQueue({
                                   </span>
                                 </p>
                               )}
-                              {habit && (
+                              {habit ? (
                                 <HabitHorizonRing
                                   habit={habit}
                                   logs={logsByHabit.get(habit.id) ?? []}
                                 />
+                              ) : (
+                                onStartHabit && (
+                                  <button
+                                    onClick={() => onStartHabit(rule.id)}
+                                    className="flex w-fit items-center gap-1.5 rounded-lg border border-orange-800/50 bg-orange-950/20 px-3 py-1.5 text-xs text-orange-300 transition hover:bg-orange-900/30"
+                                  >
+                                    <Flame size={12} />
+                                    Start 66-day habit
+                                  </button>
+                                )
                               )}
                             </div>
                           );
