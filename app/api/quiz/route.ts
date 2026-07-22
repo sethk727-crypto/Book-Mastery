@@ -44,6 +44,16 @@ const QUIZ_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+/**
+ * Env values pasted into hosting dashboards often pick up stray newlines or
+ * spaces; a newline in a header value throws "invalid header value". API keys
+ * and model names never contain whitespace, so strip it all.
+ */
+function cleanEnv(value: string | undefined): string | undefined {
+  const cleaned = value?.replace(/\s+/g, "");
+  return cleaned ? cleaned : undefined;
+}
+
 const SYSTEM_PROMPT =
   "You write comprehension tests for a speed-reading app. Questions must be answerable ONLY from the provided excerpt, test genuine understanding (main claims, causal reasoning, key details) rather than trivia, and have exactly one clearly correct option among four plausible ones.";
 
@@ -54,12 +64,12 @@ function userPrompt(title: string, excerpt: string): string {
 // ---- Provider: OpenAI (used when OPENAI_API_KEY is set) --------------------
 
 async function generateWithOpenAI(title: string, excerpt: string): Promise<string> {
-  const model = process.env.OPENAI_QUIZ_MODEL ?? "gpt-4o-mini";
+  const model = cleanEnv(process.env.OPENAI_QUIZ_MODEL) ?? "gpt-4o-mini";
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      Authorization: `Bearer ${cleanEnv(process.env.OPENAI_API_KEY)}`,
     },
     body: JSON.stringify({
       model,
@@ -92,7 +102,7 @@ async function generateWithOpenAI(title: string, excerpt: string): Promise<strin
 // ---- Provider: Claude (fallback when only ANTHROPIC_API_KEY is set) --------
 
 async function generateWithClaude(title: string, excerpt: string): Promise<string> {
-  const anthropic = new Anthropic();
+  const anthropic = new Anthropic({ apiKey: cleanEnv(process.env.ANTHROPIC_API_KEY) });
   const response = await anthropic.messages.create({
     model: "claude-opus-4-8",
     max_tokens: 16000,
@@ -115,9 +125,9 @@ async function generateWithClaude(title: string, excerpt: string): Promise<strin
 }
 
 export async function POST(req: NextRequest) {
-  const provider = process.env.OPENAI_API_KEY
+  const provider = cleanEnv(process.env.OPENAI_API_KEY)
     ? "openai"
-    : process.env.ANTHROPIC_API_KEY
+    : cleanEnv(process.env.ANTHROPIC_API_KEY)
       ? "claude"
       : null;
 
