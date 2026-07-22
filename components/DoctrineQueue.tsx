@@ -10,8 +10,10 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   Brain,
   ChevronDown,
+  Download,
   Flame,
   MessageSquareWarning,
+  Search,
   Target,
   Zap,
 } from "lucide-react";
@@ -43,17 +45,48 @@ export default function DoctrineQueue({
   onStartHabit,
 }: DoctrineQueueProps) {
   const [openCue, setOpenCue] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   const byCue = useMemo(() => {
+    const needle = query.trim().toLowerCase();
     const groups = new Map<string, DoctrineRule[]>();
     for (const rule of rules.filter((r) => r.is_active)) {
+      if (
+        needle &&
+        ![rule.context_cue, rule.behavior_command, rule.why_true]
+          .join(" ")
+          .toLowerCase()
+          .includes(needle)
+      ) {
+        continue;
+      }
       const list = groups.get(rule.context_cue) ?? [];
       list.push(rule);
       groups.set(rule.context_cue, list);
     }
     // Alphabetical by cue — deliberately NO grouping or ordering by book.
     return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
-  }, [rules]);
+  }, [rules, query]);
+
+  const exportMarkdown = () => {
+    const lines: string[] = ["# Living Doctrine", ""];
+    for (const [cue, cueRules] of byCue) {
+      lines.push(`## ${cue}`, "");
+      for (const rule of cueRules) {
+        lines.push(`- **If** ${rule.context_cue} **→ then** ${rule.behavior_command}`);
+        if (rule.why_true) lines.push(`  - *Why true:* ${rule.why_true}`);
+        if (rule.arguing_pair_clash) lines.push(`  - *Clash:* ${rule.arguing_pair_clash}`);
+      }
+      lines.push("");
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "living-doctrine.md";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const habitByRule = useMemo(
     () => new Map(habits.map((h) => [h.doctrine_rule_id, h])),
@@ -86,13 +119,35 @@ export default function DoctrineQueue({
 
       {/* -------------------------------------------- Trigger registry */}
       <section>
-        <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-white">
-          <Target size={18} className="text-accent-soft" />
-          Doctrine Registry
-          <span className="text-xs font-normal text-neutral-500">
-            sorted by trigger, never by book
-          </span>
-        </h2>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-white">
+            <Target size={18} className="text-accent-soft" />
+            Doctrine Registry
+            <span className="text-xs font-normal text-neutral-500">
+              sorted by trigger, never by book
+            </span>
+          </h2>
+          <button
+            onClick={exportMarkdown}
+            className="flex items-center gap-1.5 rounded-lg border border-neutral-700 px-3 py-1.5 text-xs text-neutral-400 transition hover:border-accent hover:text-white"
+            title="Download all rules as a Markdown file"
+          >
+            <Download size={12} /> Export .md
+          </button>
+        </div>
+
+        <div className="relative mb-3">
+          <Search
+            size={14}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500"
+          />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search rules by cue, command, or reason…"
+            className="w-full rounded-lg border border-neutral-800 bg-surface-raised py-2.5 pl-9 pr-3 text-sm text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-accent"
+          />
+        </div>
 
         <div className="flex flex-col gap-2">
           {byCue.length === 0 && (

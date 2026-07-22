@@ -10,10 +10,12 @@ import {
   BookOpen,
   BookUp2,
   Clock,
+  Flame,
   Gauge,
   Library,
   Loader2,
   LogIn,
+  Search,
   Trash2,
   Type,
 } from "lucide-react";
@@ -27,6 +29,7 @@ interface ReadingStats {
   totalMinutes: number;
   sessionCount: number;
   avgWPM: number;
+  streakDays: number;
 }
 
 const EMPTY_STATS: ReadingStats = {
@@ -34,7 +37,23 @@ const EMPTY_STATS: ReadingStats = {
   totalMinutes: 0,
   sessionCount: 0,
   avgWPM: 0,
+  streakDays: 0,
 };
+
+/** Consecutive days (ending today or yesterday) with at least one sprint. */
+function computeStreak(sessionDates: string[]): number {
+  const days = new Set(sessionDates.map((d) => d.slice(0, 10)));
+  const DAY_MS = 86_400_000;
+  let cursor = Date.now();
+  // A streak is still alive if you read yesterday but not yet today.
+  if (!days.has(new Date(cursor).toISOString().slice(0, 10))) cursor -= DAY_MS;
+  let streak = 0;
+  while (days.has(new Date(cursor).toISOString().slice(0, 10))) {
+    streak++;
+    cursor -= DAY_MS;
+  }
+  return streak;
+}
 
 export default function LibraryPage() {
   const [state, setState] = useState<PageState>("loading");
@@ -42,6 +61,7 @@ export default function LibraryPage() {
   const [stats, setStats] = useState<ReadingStats>(EMPTY_STATS);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -56,7 +76,7 @@ export default function LibraryPage() {
 
       const [booksRes, sessionsRes] = await Promise.all([
         supabase.from("books").select("*").order("created_at", { ascending: false }),
-        supabase.from("rsvp_sessions").select("words_consumed, active_ms"),
+        supabase.from("rsvp_sessions").select("words_consumed, active_ms, started_at"),
       ]);
 
       setBooks((booksRes.data as Book[] | null) ?? []);
@@ -69,6 +89,9 @@ export default function LibraryPage() {
         totalMinutes: Math.round(totalMs / 60_000),
         sessionCount: sessions.length,
         avgWPM: totalMs > 0 ? Math.round((totalWords / totalMs) * 60_000) : 0,
+        streakDays: computeStreak(
+          sessions.map((s) => s.started_at as string).filter(Boolean)
+        ),
       });
       setState("ready");
     } catch {
@@ -150,12 +173,13 @@ export default function LibraryPage() {
       {state === "ready" && (
         <>
           {/* -------------------------------------------- Lifetime stats */}
-          <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             {[
               { icon: Type, label: "Words read", value: stats.totalWords.toLocaleString() },
               { icon: Clock, label: "Minutes reading", value: stats.totalMinutes.toLocaleString() },
               { icon: BookOpen, label: "Sprints", value: String(stats.sessionCount) },
               { icon: Gauge, label: "Lifetime avg WPM", value: stats.avgWPM ? String(stats.avgWPM) : "—" },
+              { icon: Flame, label: "Day streak", value: String(stats.streakDays) },
             ].map(({ icon: Icon, label, value }) => (
               <div key={label} className="rounded-xl border border-neutral-800 bg-surface-raised p-4 text-center">
                 <div className="flex items-center justify-center gap-1.5 text-xs uppercase tracking-wider text-neutral-500">
@@ -170,6 +194,22 @@ export default function LibraryPage() {
             <p className="mb-4 rounded-lg border border-red-900/50 bg-red-950/30 p-3 text-sm text-red-300">
               {error}
             </p>
+          )}
+
+          {/* -------------------------------------------- Search */}
+          {books.length > 3 && (
+            <div className="relative mb-4">
+              <Search
+                size={14}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500"
+              />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search your library…"
+                className="w-full rounded-lg border border-neutral-800 bg-surface-raised py-2.5 pl-9 pr-3 text-sm text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-accent"
+              />
+            </div>
           )}
 
           {/* -------------------------------------------- Book list */}
@@ -187,7 +227,13 @@ export default function LibraryPage() {
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              {books.map((book) => (
+              {books
+                .filter(
+                  (b) =>
+                    query.trim() === "" ||
+                    b.title.toLowerCase().includes(query.trim().toLowerCase())
+                )
+                .map((book) => (
                 <div
                   key={book.id}
                   className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-neutral-800 bg-surface-raised p-4"
