@@ -1,8 +1,10 @@
 // ============================================================================
 // POST /api/quiz — generate a post-sprint comprehension test from the exact
-// word range the reader just consumed, using the Claude API with structured
-// JSON output. Returns 503 when ANTHROPIC_API_KEY is not configured so the
-// UI can degrade gracefully.
+// word range the reader just consumed.
+//
+// Provider selection: uses OPENAI_API_KEY if set, otherwise
+// ANTHROPIC_API_KEY. Returns 503 when neither is configured so the UI can
+// degrade gracefully.
 //
 // Body: { "bookId": "<uuid>", "startWord": number, "endWord": number }
 // Auth: Bearer <supabase access token> — caller must own the book.
@@ -42,12 +44,88 @@ const QUIZ_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+const SYSTEM_PROMPT =
+  "You write comprehension tests for a speed-reading app. Questions must be answerable ONLY from the provided excerpt, test genuine understanding (main claims, causal reasoning, key details) rather than trivia, and have exactly one clearly correct option among four plausible ones.";
+
+function userPrompt(title: string, excerpt: string): string {
+  return `The reader just speed-read this excerpt from "${title}". Write exactly ${QUESTION_COUNT} multiple-choice questions, each with exactly 4 options.\n\n<excerpt>\n${excerpt}\n</excerpt>`;
+}
+
+// ---- Provider: OpenAI (used when OPENAI_API_KEY is set) --------------------
+
+async function generateWithOpenAI(title: string, excerpt: string): Promise<string> {
+  const model = process.env.OPENAI_QUIZ_MODEL ?? "gpt-4o-mini";
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userPrompt(title, excerpt) },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: "quiz", strict: true, schema: QUIZ_SCHEMA },
+      },
+    }),
+  });
+  if (!res.ok) {
+    const detail = (await res.json().catch(() => null)) as
+      | { error?: { message?: string } }
+      | null;
+    throw new Error(
+      `OpenAI request failed (${res.status}): ${detail?.error?.message ?? "unknown error"}`
+    );
+  }
+  const payload = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  const content = payload.choices?.[0]?.message?.content;
+  if (!content) throw new Error("OpenAI returned no content");
+  return content;
+}
+
+// ---- Provider: Claude (fallback when only ANTHROPIC_API_KEY is set) --------
+
+async function generateWithClaude(title: string, excerpt: string): Promise<string> {
+  const anthropic = new Anthropic();
+  const response = await anthropic.messages.create({
+    model: "claude-opus-4-8",
+    max_tokens: 16000,
+    thinking: { type: "adaptive" },
+    output_config: {
+      effort: "low",
+      format: { type: "json_schema", schema: QUIZ_SCHEMA },
+    },
+    system: SYSTEM_PROMPT,
+    messages: [{ role: "user", content: userPrompt(title, excerpt) }],
+  });
+  if (response.stop_reason === "refusal") {
+    throw new Error("Quiz generation was declined for this content.");
+  }
+  const textBlock = response.content.find(
+    (b): b is Anthropic.TextBlock => b.type === "text"
+  );
+  if (!textBlock) throw new Error("No text content in model response");
+  return textBlock.text;
+}
+
 export async function POST(req: NextRequest) {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const provider = process.env.OPENAI_API_KEY
+    ? "openai"
+    : process.env.ANTHROPIC_API_KEY
+      ? "claude"
+      : null;
+
+  if (!provider) {
     return NextResponse.json(
       {
         error:
-          "Comprehension quizzes are not configured. Set ANTHROPIC_API_KEY in your deployment environment.",
+          "Comprehension quizzes are not configured. Set OPENAI_API_KEY (or ANTHROPIC_API_KEY) in your deployment environment.",
       },
       { status: 503 }
     );
@@ -108,40 +186,12 @@ export async function POST(req: NextRequest) {
 
   // ---- Generate the quiz ---------------------------------------------------
   try {
-    const anthropic = new Anthropic();
-    const response = await anthropic.messages.create({
-      model: "claude-opus-4-8",
-      max_tokens: 16000,
-      thinking: { type: "adaptive" },
-      output_config: {
-        effort: "low",
-        format: { type: "json_schema", schema: QUIZ_SCHEMA },
-      },
-      system:
-        "You write comprehension tests for a speed-reading app. Questions must be answerable ONLY from the provided excerpt, test genuine understanding (main claims, causal reasoning, key details) rather than trivia, and have exactly one clearly correct option among four plausible ones.",
-      messages: [
-        {
-          role: "user",
-          content: `The reader just speed-read this excerpt from "${book.title}". Write exactly ${QUESTION_COUNT} multiple-choice questions, each with exactly 4 options.\n\n<excerpt>\n${excerpt}\n</excerpt>`,
-        },
-      ],
-    });
+    const raw =
+      provider === "openai"
+        ? await generateWithOpenAI(book.title, excerpt)
+        : await generateWithClaude(book.title, excerpt);
 
-    if (response.stop_reason === "refusal") {
-      return NextResponse.json(
-        { error: "Quiz generation was declined for this content." },
-        { status: 422 }
-      );
-    }
-
-    const textBlock = response.content.find(
-      (b): b is Anthropic.TextBlock => b.type === "text"
-    );
-    if (!textBlock) {
-      throw new Error("No text content in model response");
-    }
-
-    const parsed = JSON.parse(textBlock.text) as { questions: QuizQuestion[] };
+    const parsed = JSON.parse(raw) as { questions: QuizQuestion[] };
     const questions = parsed.questions
       .filter((q) => q.options.length === 4)
       .slice(0, QUESTION_COUNT);
