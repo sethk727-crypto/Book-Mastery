@@ -24,7 +24,7 @@ import {
 import BookNavigator from "@/components/BookNavigator";
 import ConceptBingo from "@/components/ConceptBingo";
 import RSVPReader from "@/components/RSVPReader";
-import { buildOutline, PARAGRAPHS_PER_PAGE } from "@/lib/chapters";
+import { buildOutline, chapterAtWord, PARAGRAPHS_PER_PAGE } from "@/lib/chapters";
 import type { Book, RSVPMetrics } from "@/lib/types";
 
 /** Bionic reading: bold the first ~40% of each word to anchor the eye. */
@@ -71,6 +71,10 @@ export default function SprintReader({
   const [showNav, setShowNav] = useState(false);
   const [showBingo, setShowBingo] = useState(false);
   const [bionic, setBionic] = useState(false);
+  // Where the RSVP stream starts; changing it re-seats the stream (keyed below).
+  const [rsvpStartWord, setRsvpStartWord] = useState(book.last_word_index ?? 0);
+  // Last word position we know about in either mode (chapter label, progress).
+  const [lastKnownWord, setLastKnownWord] = useState(book.last_word_index ?? 0);
 
   const goToPage = (next: number) => {
     setPageIndex(next);
@@ -97,8 +101,36 @@ export default function SprintReader({
   );
   const furthestWord = Math.max(
     book.last_word_index ?? 0,
+    lastKnownWord,
     outline.paragraphWordStart[lastParagraphOnPage] ?? 0
   );
+
+  const currentChapter = chapterAtWord(
+    outline,
+    mode === "rsvp"
+      ? lastKnownWord
+      : outline.paragraphWordStart[safePageIndex * PARAGRAPHS_PER_PAGE] ?? 0
+  );
+
+  /** Mode switches keep your position: page → word and word → page. */
+  const switchMode = (next: "page" | "rsvp") => {
+    if (next === mode) return;
+    if (next === "rsvp") {
+      const pageStartWord =
+        outline.paragraphWordStart[safePageIndex * PARAGRAPHS_PER_PAGE] ?? 0;
+      setRsvpStartWord(pageStartWord);
+      setLastKnownWord(pageStartWord);
+    } else {
+      // Land on the page containing the RSVP stream's last known word.
+      let paragraph = 0;
+      for (let i = 0; i < outline.paragraphWordStart.length; i++) {
+        if (outline.paragraphWordStart[i] <= lastKnownWord) paragraph = i;
+        else break;
+      }
+      setPageIndex(Math.floor(paragraph / PARAGRAPHS_PER_PAGE));
+    }
+    setMode(next);
+  };
 
   // One suppressor for every annotation/exfiltration vector.
   const suppress = useCallback((e: React.SyntheticEvent) => {
@@ -126,7 +158,7 @@ export default function SprintReader({
         </div>
         <div className="flex gap-1 rounded-lg bg-surface-raised p-1">
           <button
-            onClick={() => setMode("page")}
+            onClick={() => switchMode("page")}
             className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm ${
               mode === "page" ? "bg-accent text-white" : "text-neutral-400 hover:text-white"
             }`}
@@ -134,7 +166,7 @@ export default function SprintReader({
             <Rows3 size={14} /> Pages
           </button>
           <button
-            onClick={() => setMode("rsvp")}
+            onClick={() => switchMode("rsvp")}
             className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm ${
               mode === "rsvp" ? "bg-accent text-white" : "text-neutral-400 hover:text-white"
             }`}
@@ -190,9 +222,15 @@ export default function SprintReader({
           outline={outline}
           currentPage={safePageIndex}
           furthestWord={furthestWord}
-          onJumpToPage={(p) => {
-            setMode("page");
-            goToPage(p);
+          onJump={({ pageIndex: targetPage, wordIndex }) => {
+            if (mode === "rsvp") {
+              // Re-seat the RSVP stream at the chapter/match position.
+              setRsvpStartWord(wordIndex);
+              setLastKnownWord(wordIndex);
+              onProgress?.({ wordIndex });
+            } else {
+              goToPage(targetPage);
+            }
           }}
           onQuizRange={onQuizRange}
         />
@@ -200,13 +238,24 @@ export default function SprintReader({
 
       {/* ------------------------------------------------ Reading surface */}
       {mode === "rsvp" ? (
-        <RSVPReader
-          text={book.extracted_text}
-          initialWPM={350}
-          startWordIndex={book.last_word_index ?? 0}
-          onSprintComplete={onSprintComplete}
-          onPositionChange={(wordIndex) => onProgress?.({ wordIndex })}
-        />
+        <div className="flex flex-col gap-2">
+          {currentChapter && (
+            <p className="text-center text-xs text-neutral-500">
+              Now in: <span className="text-neutral-300">{currentChapter.title}</span>
+            </p>
+          )}
+          <RSVPReader
+            key={rsvpStartWord} // re-seat the stream when a jump changes the start
+            text={book.extracted_text}
+            initialWPM={350}
+            startWordIndex={rsvpStartWord}
+            onSprintComplete={onSprintComplete}
+            onPositionChange={(wordIndex) => {
+              setLastKnownWord(wordIndex);
+              onProgress?.({ wordIndex });
+            }}
+          />
+        </div>
       ) : (
         <div
           // The lockdown: no selection, no copy/cut, no right-click, no drag.

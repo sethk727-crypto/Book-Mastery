@@ -27,6 +27,12 @@ export interface PendingEvidence {
   locator: string;
 }
 
+export interface JumpTarget {
+  pageIndex: number;
+  /** Absolute word index — lets the RSVP stream jump too. */
+  wordIndex: number;
+}
+
 export interface BookNavigatorProps {
   bookId: string;
   bookTitle: string;
@@ -34,7 +40,8 @@ export interface BookNavigatorProps {
   currentPage: number;
   /** Highest word index the reader has reached (for chapter progress). */
   furthestWord: number;
-  onJumpToPage: (pageIndex: number) => void;
+  /** Jump to a position — the reader applies it to whichever mode is active. */
+  onJump: (target: JumpTarget) => void;
   /** Launch a comprehension quiz over a chapter's word range. */
   onQuizRange?: (startWord: number, endWord: number) => void;
 }
@@ -45,7 +52,7 @@ export default function BookNavigator({
   outline,
   currentPage,
   furthestWord,
-  onJumpToPage,
+  onJump,
   onQuizRange,
 }: BookNavigatorProps) {
   const [tab, setTab] = useState<"chapters" | "search">("chapters");
@@ -106,7 +113,9 @@ export default function BookNavigator({
                 }`}
               >
                 <button
-                  onClick={() => onJumpToPage(chapter.pageIndex)}
+                  onClick={() =>
+                    onJump({ pageIndex: chapter.pageIndex, wordIndex: chapter.wordIndex })
+                  }
                   className="flex min-w-0 flex-1 items-center gap-2 text-left"
                 >
                   {isRead ? (
@@ -166,7 +175,12 @@ export default function BookNavigator({
                 className="rounded-lg border border-neutral-800 p-2 hover:border-neutral-600"
               >
                 <button
-                  onClick={() => onJumpToPage(match.pageIndex)}
+                  onClick={() =>
+                    onJump({
+                      pageIndex: match.pageIndex,
+                      wordIndex: outline.paragraphWordStart[match.paragraphIndex] ?? 0,
+                    })
+                  }
                   className="w-full text-left"
                 >
                   <span className="text-xs text-accent-soft">Page {match.pageIndex + 1}</span>
