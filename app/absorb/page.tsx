@@ -317,6 +317,9 @@ function AbsorbFlow() {
             onSprintComplete={(metrics) => void persistSprint(stage.book, metrics)}
             onFinishBook={() => setStage({ name: "recall", book: stage.book })}
             onProgress={(progress) => saveProgress(stage.book, progress)}
+            onQuizRange={(startWord, endWord) =>
+              setQuiz({ bookId: stage.book.id, startWord, endWord, sessionId: null })
+            }
           />
         </div>
       )}

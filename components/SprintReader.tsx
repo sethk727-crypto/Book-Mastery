@@ -13,15 +13,38 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowLeft,
   ArrowRight,
+  Bold,
   BookOpenCheck,
   EyeOff,
+  Grid3x3,
+  ListTree,
   Rows3,
   Zap,
 } from "lucide-react";
+import BookNavigator from "@/components/BookNavigator";
+import ConceptBingo from "@/components/ConceptBingo";
 import RSVPReader from "@/components/RSVPReader";
+import { buildOutline, PARAGRAPHS_PER_PAGE } from "@/lib/chapters";
 import type { Book, RSVPMetrics } from "@/lib/types";
 
-const PARAGRAPHS_PER_PAGE = 6;
+/** Bionic reading: bold the first ~40% of each word to anchor the eye. */
+function BionicText({ text }: { text: string }) {
+  const parts = text.split(/(\s+)/);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (/^\s*$/.test(part)) return part;
+        const split = Math.max(1, Math.ceil(part.length * 0.4));
+        return (
+          <span key={i}>
+            <span className="font-semibold text-white">{part.slice(0, split)}</span>
+            {part.slice(split)}
+          </span>
+        );
+      })}
+    </>
+  );
+}
 
 export interface SprintReaderProps {
   book: Book;
@@ -31,6 +54,8 @@ export interface SprintReaderProps {
   onFinishBook: () => void;
   /** Persist reading position (page turns / RSVP pauses) for resume. */
   onProgress?: (progress: { pageIndex?: number; wordIndex?: number }) => void;
+  /** Launch a comprehension quiz over an arbitrary word range (chapters). */
+  onQuizRange?: (startWord: number, endWord: number) => void;
 }
 
 export default function SprintReader({
@@ -38,30 +63,41 @@ export default function SprintReader({
   onSprintComplete,
   onFinishBook,
   onProgress,
+  onQuizRange,
 }: SprintReaderProps) {
   const [mode, setMode] = useState<"page" | "rsvp">("page");
   const [pageIndex, setPageIndex] = useState(book.last_page_index ?? 0);
   const [confirmFinish, setConfirmFinish] = useState(false);
+  const [showNav, setShowNav] = useState(false);
+  const [showBingo, setShowBingo] = useState(false);
+  const [bionic, setBionic] = useState(false);
 
   const goToPage = (next: number) => {
     setPageIndex(next);
     onProgress?.({ pageIndex: next });
   };
 
-  const paragraphs = useMemo(
-    () =>
-      (book.extracted_text ?? "")
-        .split(/\n\s*\n/)
-        .map((p) => p.trim())
-        .filter(Boolean),
+  const outline = useMemo(
+    () => buildOutline(book.extracted_text ?? ""),
     [book.extracted_text]
   );
 
-  const pageCount = Math.max(1, Math.ceil(paragraphs.length / PARAGRAPHS_PER_PAGE));
+  const paragraphs = outline.paragraphs;
+  const pageCount = outline.pageCount;
   const safePageIndex = Math.min(pageIndex, pageCount - 1);
   const page = paragraphs.slice(
     safePageIndex * PARAGRAPHS_PER_PAGE,
     (safePageIndex + 1) * PARAGRAPHS_PER_PAGE
+  );
+
+  // Furthest position reached: saved resume point or the end of this page.
+  const lastParagraphOnPage = Math.min(
+    paragraphs.length - 1,
+    (safePageIndex + 1) * PARAGRAPHS_PER_PAGE - 1
+  );
+  const furthestWord = Math.max(
+    book.last_word_index ?? 0,
+    outline.paragraphWordStart[lastParagraphOnPage] ?? 0
   );
 
   // One suppressor for every annotation/exfiltration vector.
@@ -108,6 +144,60 @@ export default function SprintReader({
         </div>
       </div>
 
+      {/* ------------------------------------------------ Reading toolbar */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setShowNav((v) => !v)}
+          className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition ${
+            showNav
+              ? "bg-accent text-white"
+              : "bg-surface-raised text-neutral-400 hover:text-white"
+          }`}
+        >
+          <ListTree size={13} /> Chapters &amp; search
+        </button>
+        {mode === "page" && (
+          <>
+            <button
+              onClick={() => setShowBingo((v) => !v)}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition ${
+                showBingo
+                  ? "bg-accent text-white"
+                  : "bg-surface-raised text-neutral-400 hover:text-white"
+              }`}
+            >
+              <Grid3x3 size={13} /> Bingo
+            </button>
+            <button
+              onClick={() => setBionic((v) => !v)}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition ${
+                bionic
+                  ? "bg-accent text-white"
+                  : "bg-surface-raised text-neutral-400 hover:text-white"
+              }`}
+              title="Bionic reading: bolds the first part of each word"
+            >
+              <Bold size={13} /> Bionic
+            </button>
+          </>
+        )}
+      </div>
+
+      {showNav && (
+        <BookNavigator
+          bookId={book.id}
+          bookTitle={book.title}
+          outline={outline}
+          currentPage={safePageIndex}
+          furthestWord={furthestWord}
+          onJumpToPage={(p) => {
+            setMode("page");
+            goToPage(p);
+          }}
+          onQuizRange={onQuizRange}
+        />
+      )}
+
       {/* ------------------------------------------------ Reading surface */}
       {mode === "rsvp" ? (
         <RSVPReader
@@ -138,7 +228,7 @@ export default function SprintReader({
             >
               {page.map((paragraph, i) => (
                 <p key={i} className="font-reader text-lg leading-relaxed text-neutral-200">
-                  {paragraph}
+                  {bionic ? <BionicText text={paragraph} /> : paragraph}
                 </p>
               ))}
             </motion.div>
@@ -164,6 +254,13 @@ export default function SprintReader({
             </button>
           </div>
         </div>
+      )}
+
+      {mode === "page" && showBingo && (
+        <ConceptBingo
+          sourceText={page.join(" ")}
+          storageKey={`${book.id}:${safePageIndex}`}
+        />
       )}
 
       {/* ------------------------------------------------ Finish Book */}

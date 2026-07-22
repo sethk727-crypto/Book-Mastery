@@ -11,6 +11,7 @@ import Link from "next/link";
 import { BookOpenText, BookUp2, Brain, Sun, Target } from "lucide-react";
 import RSVPReader from "@/components/RSVPReader";
 import ReconsolidationStudio from "@/components/ReconsolidationStudio";
+import RewriteWizard, { type RewriteDraft } from "@/components/RewriteWizard";
 import DoctrineQueue from "@/components/DoctrineQueue";
 import DailyLiturgy from "@/components/DailyLiturgy";
 import { getSupabase } from "@/lib/supabase";
@@ -136,12 +137,14 @@ type DataMode = "loading" | "demo" | "live";
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>("rsvp");
-  const [studioOpen, setStudioOpen] = useState(false);
   const [mode, setMode] = useState<DataMode>("loading");
   const [rules, setRules] = useState<DoctrineRule[]>(SAMPLE_RULES);
   const [schedules, setSchedules] = useState<ReviewSchedule[]>(SAMPLE_SCHEDULES);
   const [habits, setHabits] = useState<Habit[]>([SAMPLE_HABIT]);
   const [habitLogs, setHabitLogs] = useState<HabitLog[]>(SAMPLE_HABIT_LOGS);
+  const [rewrites, setRewrites] = useState<SchemaRewrite[]>([SAMPLE_REWRITE]);
+  const [openRewrite, setOpenRewrite] = useState<SchemaRewrite | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   // Load the signed-in user's real doctrine; fall back to demo data.
   useEffect(() => {
@@ -156,17 +159,23 @@ export default function Home() {
           if (!cancelled) setMode("demo");
           return;
         }
-        const [rulesRes, schedulesRes, habitsRes, logsRes] = await Promise.all([
-          supabase.from("doctrine_rules").select("*"),
-          supabase.from("review_schedules").select("*"),
-          supabase.from("habits").select("*"),
-          supabase.from("habit_logs").select("*"),
-        ]);
+        const [rulesRes, schedulesRes, habitsRes, logsRes, rewritesRes] =
+          await Promise.all([
+            supabase.from("doctrine_rules").select("*"),
+            supabase.from("review_schedules").select("*"),
+            supabase.from("habits").select("*"),
+            supabase.from("habit_logs").select("*"),
+            supabase
+              .from("schema_rewrites")
+              .select("*")
+              .order("created_at", { ascending: false }),
+          ]);
         if (cancelled) return;
         setRules((rulesRes.data as DoctrineRule[] | null) ?? []);
         setSchedules((schedulesRes.data as ReviewSchedule[] | null) ?? []);
         setHabits((habitsRes.data as Habit[] | null) ?? []);
         setHabitLogs((logsRes.data as HabitLog[] | null) ?? []);
+        setRewrites((rewritesRes.data as SchemaRewrite[] | null) ?? []);
         setMode("live");
       } catch {
         if (!cancelled) setMode("demo");
@@ -229,6 +238,86 @@ export default function Home() {
         });
         if (error) console.error("Failed to log habit:", error.message);
       })();
+    },
+    [mode]
+  );
+
+  // ---- Reconsolidation: create rewrites and persist window/rep updates ----
+  const handleSaveRewrite = useCallback(
+    (draft: RewriteDraft) => {
+      setWizardOpen(false);
+      const local: SchemaRewrite = {
+        id: crypto.randomUUID(),
+        user_id: "local",
+        book_id: draft.book_id,
+        status: "evidence_extracted",
+        friction_description: draft.friction_description,
+        old_schema: draft.old_schema,
+        old_schema_emotional_charge: draft.old_schema_emotional_charge,
+        disconfirming_evidence: draft.disconfirming_evidence,
+        evidence_source_locator: draft.evidence_source_locator || null,
+        juxtaposed_at: null,
+        window_opened_at: null,
+        window_closes_at: null,
+        recall_reps_required: 3,
+        recall_reps_completed: 0,
+        verified_at: null,
+        verification_notes: null,
+        permanence_score: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      if (mode !== "live") {
+        setRewrites((prev) => [local, ...prev]);
+        setOpenRewrite(local);
+        return;
+      }
+      void (async () => {
+        const supabase = getSupabase();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data, error } = await supabase
+          .from("schema_rewrites")
+          .insert({
+            user_id: user.id,
+            book_id: draft.book_id,
+            status: "evidence_extracted",
+            friction_description: draft.friction_description,
+            old_schema: draft.old_schema,
+            old_schema_emotional_charge: draft.old_schema_emotional_charge,
+            disconfirming_evidence: draft.disconfirming_evidence,
+            evidence_source_locator: draft.evidence_source_locator || null,
+          })
+          .select("*")
+          .single<SchemaRewrite>();
+        if (error || !data) {
+          console.error("Failed to save rewrite:", error?.message);
+          setRewrites((prev) => [local, ...prev]);
+          setOpenRewrite(local);
+          return;
+        }
+        setRewrites((prev) => [data, ...prev]);
+        setOpenRewrite(data);
+      })();
+    },
+    [mode]
+  );
+
+  const patchRewrite = useCallback(
+    (id: string, patch: Partial<SchemaRewrite>) => {
+      setRewrites((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+      setOpenRewrite((prev) => (prev && prev.id === id ? { ...prev, ...patch } : prev));
+      if (mode !== "live") return;
+      void getSupabase()
+        .from("schema_rewrites")
+        .update(patch)
+        .eq("id", id)
+        .then(({ error }) => {
+          if (error) console.error("Failed to save rewrite update:", error.message);
+        });
     },
     [mode]
   );
@@ -325,17 +414,92 @@ export default function Home() {
       )}
 
       {tab === "reconsolidation" && (
-        <div className="text-center">
-          <button
-            onClick={() => setStudioOpen(true)}
-            className="rounded-xl bg-accent px-6 py-3 font-medium text-white hover:bg-accent-soft"
-          >
-            Open Juxtaposition Studio (demo rewrite)
-          </button>
-          {studioOpen && (
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-neutral-400">
+              Log a mental block, retrieve the old belief, and juxtapose it
+              with evidence from your reading. Tip: save passages via your
+              book&apos;s <span className="text-neutral-200">Search</span> panel
+              — they prefill Step C here.
+            </p>
+            <button
+              onClick={() => setWizardOpen(true)}
+              className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-soft"
+            >
+              + New schema rewrite
+            </button>
+          </div>
+
+          {rewrites.length === 0 ? (
+            <p className="rounded-xl border border-neutral-800 bg-surface p-8 text-center text-sm text-neutral-500">
+              No rewrites yet. Start with the friction you want gone.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {rewrites.map((rewrite) => {
+                const windowOpen =
+                  rewrite.status === "window_open" &&
+                  rewrite.window_opened_at &&
+                  Date.now() <
+                    new Date(rewrite.window_opened_at).getTime() + 5 * 3600_000;
+                return (
+                  <button
+                    key={rewrite.id}
+                    onClick={() => setOpenRewrite(rewrite)}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-neutral-800 bg-surface p-4 text-left transition hover:border-accent/50"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-neutral-100">
+                        {rewrite.friction_description}
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-neutral-500">
+                        Old belief: {rewrite.old_schema ?? "—"}
+                      </p>
+                    </div>
+                    <span
+                      className={`shrink-0 rounded-full px-2.5 py-1 text-xs ${
+                        windowOpen
+                          ? "animate-pulseRing bg-accent/20 text-accent-soft"
+                          : rewrite.status === "window_closed"
+                            ? "bg-emerald-950/60 text-emerald-300"
+                            : "bg-surface-overlay text-neutral-400"
+                      }`}
+                    >
+                      {windowOpen
+                        ? "window open"
+                        : rewrite.status.replace(/_/g, " ")}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {wizardOpen && (
+            <RewriteWizard
+              onSave={handleSaveRewrite}
+              onClose={() => setWizardOpen(false)}
+            />
+          )}
+
+          {openRewrite && (
             <ReconsolidationStudio
-              rewrite={SAMPLE_REWRITE}
-              onClose={() => setStudioOpen(false)}
+              key={openRewrite.id}
+              rewrite={openRewrite}
+              onWindowOpened={(openedAt) =>
+                patchRewrite(openRewrite.id, {
+                  status: "window_open",
+                  juxtaposed_at: new Date().toISOString(),
+                  window_opened_at: openedAt.toISOString(),
+                })
+              }
+              onRepComplete={(ordinal) =>
+                patchRewrite(openRewrite.id, { recall_reps_completed: ordinal })
+              }
+              onWindowClosed={() =>
+                patchRewrite(openRewrite.id, { status: "window_closed" })
+              }
+              onClose={() => setOpenRewrite(null)}
             />
           )}
         </div>
