@@ -5,12 +5,14 @@
 // punctuation delay, WPM controls (200–1200), and metric tallying.
 // ============================================================================
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ChevronsLeft,
   ChevronsRight,
   Gauge,
+  Maximize2,
+  Minimize2,
   Minus,
   Pause,
   Play,
@@ -37,7 +39,15 @@ export interface RSVPReaderProps {
 }
 
 /** Renders a frame with its ORP character fixed at the horizontal center. */
-function ORPWord({ text, orpIndex }: { text: string; orpIndex: number }) {
+function ORPWord({
+  text,
+  orpIndex,
+  sizeClass = "text-5xl",
+}: {
+  text: string;
+  orpIndex: number;
+  sizeClass?: string;
+}) {
   const before = text.slice(0, orpIndex);
   const orp = text[orpIndex] ?? "";
   const after = text.slice(orpIndex + 1);
@@ -45,7 +55,7 @@ function ORPWord({ text, orpIndex }: { text: string; orpIndex: number }) {
   // Two flex-1 halves keep the ORP glyph pinned to the visual center
   // regardless of how long the pre/post segments are.
   return (
-    <div className="flex w-full items-baseline font-reader text-5xl tracking-wide">
+    <div className={`flex w-full items-baseline font-reader tracking-wide ${sizeClass}`}>
       <span className="flex-1 text-right text-neutral-100">{before}</span>
       <span className="px-[1px] font-bold text-orp">{orp}</span>
       <span className="flex-1 text-left text-neutral-100">{after}</span>
@@ -95,6 +105,30 @@ export default function RSVPReader({
     setChunkSize,
   } = reader;
 
+  // ---- Fullscreen ----------------------------------------------------------
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    void (async () => {
+      try {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        } else if (containerRef.current) {
+          await containerRef.current.requestFullscreen();
+        }
+      } catch {
+        // Fullscreen blocked (e.g. iPhone Safari) — reader keeps working inline.
+      }
+    })();
+  }, []);
+
   // Keyboard: space = play/pause, arrows = skip / WPM.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -119,16 +153,31 @@ export default function RSVPReader({
           e.preventDefault();
           setWPM(wpm - WPM_STEP);
           break;
+        case "f":
+        case "F":
+          toggleFullscreen();
+          break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [toggle, skip, setWPM, wpm]);
+  }, [toggle, skip, setWPM, wpm, toggleFullscreen]);
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-2xl bg-surface-raised p-6 shadow-xl">
+    <div
+      ref={containerRef}
+      className={`mx-auto flex w-full flex-col bg-surface-raised ${
+        isFullscreen
+          ? "h-full max-w-none justify-center gap-8 overflow-y-auto px-[8vw] py-8"
+          : "max-w-3xl gap-6 rounded-2xl p-6 shadow-xl"
+      }`}
+    >
       {/* ------------------------------------------------ Focal box */}
-      <div className="relative overflow-hidden rounded-xl border border-neutral-800 bg-surface px-6 py-14">
+      <div
+        className={`relative overflow-hidden rounded-xl border border-neutral-800 bg-surface px-6 ${
+          isFullscreen ? "py-[16vh]" : "py-14"
+        }`}
+      >
         {/* Fixation guides above/below the ORP center line */}
         <div className="pointer-events-none absolute left-1/2 top-3 h-4 w-px -translate-x-1/2 bg-orp/70" />
         <div className="pointer-events-none absolute bottom-3 left-1/2 h-4 w-px -translate-x-1/2 bg-orp/70" />
@@ -142,7 +191,11 @@ export default function RSVPReader({
               exit={{ opacity: 0 }}
               transition={{ duration: 0.04 }}
             >
-              <ORPWord text={token.text} orpIndex={token.orpIndex} />
+              <ORPWord
+                text={token.text}
+                orpIndex={token.orpIndex}
+                sizeClass={isFullscreen ? "text-6xl md:text-7xl lg:text-8xl" : "text-5xl"}
+              />
             </motion.div>
           ) : (
             <p className="text-center text-neutral-500">No text loaded.</p>
@@ -201,6 +254,15 @@ export default function RSVPReader({
           aria-label="Restart sprint"
         >
           <RotateCcw size={18} />
+        </button>
+
+        <button
+          onClick={toggleFullscreen}
+          className="rounded-lg p-2 text-neutral-400 transition hover:bg-surface-overlay hover:text-white"
+          aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+          title={isFullscreen ? "Exit fullscreen (F or Esc)" : "Fullscreen (F)"}
+        >
+          {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
         </button>
       </div>
 
