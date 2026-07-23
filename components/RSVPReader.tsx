@@ -163,21 +163,79 @@ export default function RSVPReader({
     return () => window.removeEventListener("keydown", handler);
   }, [toggle, skip, setWPM, wpm, toggleFullscreen]);
 
+  // ---- Fullscreen: pure black, word only, tiny corner stats ---------------
+  if (isFullscreen) {
+    return (
+      <div ref={containerRef} className="h-full w-full">
+        <div
+          className="relative flex h-screen w-screen cursor-pointer flex-col items-center justify-center bg-black"
+          onClick={toggle}
+        >
+          {/* Small stats — top right */}
+          <div className="absolute right-5 top-4 select-none text-right font-mono text-xs leading-relaxed text-neutral-600">
+            <div>{wpm} WPM set</div>
+            <div>{metrics.effectiveWPM || "—"} effective</div>
+            <div>{metrics.wordsConsumed.toLocaleString()} words</div>
+            <div>{formatDuration(metrics.activeMs)}</div>
+            <div>{Math.round(progress * 100)}%</div>
+          </div>
+
+          {/* Fixation ticks + the word */}
+          <div className="relative w-full px-[6vw]">
+            <div className="pointer-events-none absolute -top-10 left-1/2 h-5 w-px -translate-x-1/2 bg-orp/60" />
+            <div className="pointer-events-none absolute -bottom-10 left-1/2 h-5 w-px -translate-x-1/2 bg-orp/60" />
+            <AnimatePresence mode="popLayout">
+              {token && (
+                <motion.div
+                  key={`${token.startWordIndex}-${token.text}`}
+                  initial={{ opacity: 0.15 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.04 }}
+                >
+                  <ORPWord
+                    text={token.text}
+                    orpIndex={token.orpIndex}
+                    sizeClass="text-6xl md:text-7xl lg:text-8xl"
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {isComplete && (
+            <p className="absolute bottom-16 text-sm text-accent-soft">
+              Sprint complete — press Esc to exit and take the quiz.
+            </p>
+          )}
+          {!isPlaying && !isComplete && (
+            <p className="absolute bottom-16 select-none text-xs text-neutral-600">
+              paused — click anywhere or press space
+            </p>
+          )}
+
+          {/* Keyboard hints — bottom left */}
+          <div className="absolute bottom-4 left-5 select-none font-mono text-[11px] text-neutral-700">
+            space play · ↑ ↓ speed · ← → skip · F / esc exit
+          </div>
+
+          {/* Hairline progress bar */}
+          <div
+            className="absolute bottom-0 left-0 h-0.5 bg-accent transition-[width] duration-100 ease-linear"
+            style={{ width: `${progress * 100}%` }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={containerRef}
-      className={`mx-auto flex w-full flex-col bg-surface-raised ${
-        isFullscreen
-          ? "h-full max-w-none justify-center gap-8 overflow-y-auto px-[8vw] py-8"
-          : "max-w-3xl gap-6 rounded-2xl p-6 shadow-xl"
-      }`}
+      className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-2xl bg-surface-raised p-6 shadow-xl"
     >
       {/* ------------------------------------------------ Focal box */}
-      <div
-        className={`relative overflow-hidden rounded-xl border border-neutral-800 bg-surface px-6 ${
-          isFullscreen ? "py-[16vh]" : "py-14"
-        }`}
-      >
+      <div className="relative overflow-hidden rounded-xl border border-neutral-800 bg-surface px-6 py-14">
         {/* Fixation guides above/below the ORP center line */}
         <div className="pointer-events-none absolute left-1/2 top-3 h-4 w-px -translate-x-1/2 bg-orp/70" />
         <div className="pointer-events-none absolute bottom-3 left-1/2 h-4 w-px -translate-x-1/2 bg-orp/70" />
@@ -191,11 +249,7 @@ export default function RSVPReader({
               exit={{ opacity: 0 }}
               transition={{ duration: 0.04 }}
             >
-              <ORPWord
-                text={token.text}
-                orpIndex={token.orpIndex}
-                sizeClass={isFullscreen ? "text-6xl md:text-7xl lg:text-8xl" : "text-5xl"}
-              />
+              <ORPWord text={token.text} orpIndex={token.orpIndex} />
             </motion.div>
           ) : (
             <p className="text-center text-neutral-500">No text loaded.</p>
