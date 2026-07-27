@@ -106,28 +106,73 @@ export default function RSVPReader({
   } = reader;
 
   // ---- Fullscreen ----------------------------------------------------------
+  // "native" uses the Fullscreen API; "overlay" is the fallback for browsers
+  // that don't allow it (iPhone Safari): a fixed element covering the viewport.
   const containerRef = useRef<HTMLDivElement>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fsMode, setFsMode] = useState<"off" | "native" | "overlay">("off");
+  const isFullscreen = fsMode !== "off";
 
   useEffect(() => {
-    const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    const onChange = () => {
+      if (!document.fullscreenElement) {
+        setFsMode((m) => (m === "native" ? "off" : m));
+      }
+    };
     document.addEventListener("fullscreenchange", onChange);
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
 
   const toggleFullscreen = useCallback(() => {
     void (async () => {
-      try {
-        if (document.fullscreenElement) {
+      if (fsMode === "overlay") {
+        setFsMode("off");
+        return;
+      }
+      if (fsMode === "native") {
+        try {
           await document.exitFullscreen();
-        } else if (containerRef.current) {
-          await containerRef.current.requestFullscreen();
+        } catch {
+          // listener will sync state; force it anyway
+        }
+        setFsMode("off");
+        return;
+      }
+      // Entering: try native first, fall back to the overlay (iOS).
+      const el = containerRef.current as
+        | (HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> })
+        | null;
+      try {
+        if (el?.requestFullscreen) {
+          await el.requestFullscreen();
+          setFsMode("native");
+          return;
+        }
+        if (el?.webkitRequestFullscreen) {
+          await el.webkitRequestFullscreen();
+          setFsMode("native");
+          return;
         }
       } catch {
-        // Fullscreen blocked (e.g. iPhone Safari) — reader keeps working inline.
+        // fall through to overlay
       }
+      setFsMode("overlay");
     })();
-  }, []);
+  }, [fsMode]);
+
+  // Overlay mode: lock page scroll behind the overlay and exit on Escape.
+  useEffect(() => {
+    if (fsMode !== "overlay") return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFsMode("off");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [fsMode]);
 
   // Keyboard: space = play/pause, arrows = skip / WPM.
   useEffect(() => {
@@ -166,11 +211,25 @@ export default function RSVPReader({
   // ---- Fullscreen: pure black, word only, tiny corner stats ---------------
   if (isFullscreen) {
     return (
-      <div ref={containerRef} className="h-full w-full">
+      <div
+        ref={containerRef}
+        className={fsMode === "overlay" ? "fixed inset-0 z-[100]" : "h-full w-full"}
+      >
         <div
-          className="relative flex h-screen w-screen cursor-pointer flex-col items-center justify-center bg-black"
+          className="relative flex h-full w-full cursor-pointer flex-col items-center justify-center bg-black"
           onClick={toggle}
         >
+          {/* Exit — top left (touch-friendly; phones have no Esc key) */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleFullscreen();
+            }}
+            className="absolute left-4 top-4 rounded-lg p-2.5 text-neutral-600 transition hover:text-white"
+            aria-label="Exit fullscreen"
+          >
+            <Minimize2 size={18} />
+          </button>
           {/* Small stats — top right */}
           <div className="absolute right-5 top-4 select-none text-right font-mono text-xs leading-relaxed text-neutral-600">
             <div>{wpm} WPM set</div>
@@ -204,19 +263,43 @@ export default function RSVPReader({
           </div>
 
           {isComplete && (
-            <p className="absolute bottom-16 text-sm text-accent-soft">
-              Sprint complete — press Esc to exit and take the quiz.
+            <p className="absolute bottom-20 px-4 text-center text-sm text-accent-soft">
+              Sprint complete — exit fullscreen to take the quiz.
             </p>
           )}
           {!isPlaying && !isComplete && (
-            <p className="absolute bottom-16 select-none text-xs text-neutral-600">
-              paused — click anywhere or press space
+            <p className="absolute bottom-20 select-none text-xs text-neutral-600">
+              paused — tap anywhere or press space
             </p>
           )}
 
-          {/* Keyboard hints — bottom left */}
-          <div className="absolute bottom-4 left-5 select-none font-mono text-[11px] text-neutral-700">
+          {/* Keyboard hints — bottom left (desktop only) */}
+          <div className="absolute bottom-4 left-5 hidden select-none font-mono text-[11px] text-neutral-700 sm:block">
             space play · ↑ ↓ speed · ← → skip · F / esc exit
+          </div>
+
+          {/* Touch speed controls — bottom right */}
+          <div
+            className="absolute bottom-3 right-4 flex items-center gap-1.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setWPM(wpm - WPM_STEP)}
+              className="rounded-lg bg-neutral-900 p-2.5 text-neutral-500 transition hover:text-white"
+              aria-label="Slower"
+            >
+              <Minus size={16} />
+            </button>
+            <span className="w-14 select-none text-center font-mono text-xs text-neutral-600">
+              {wpm}
+            </span>
+            <button
+              onClick={() => setWPM(wpm + WPM_STEP)}
+              className="rounded-lg bg-neutral-900 p-2.5 text-neutral-500 transition hover:text-white"
+              aria-label="Faster"
+            >
+              <Plus size={16} />
+            </button>
           </div>
 
           {/* Hairline progress bar */}
