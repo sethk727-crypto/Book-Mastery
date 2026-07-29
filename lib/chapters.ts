@@ -124,6 +124,58 @@ export function buildOutline(text: string): BookOutline {
     });
   }
 
+  // Ensure the whole book is covered from word 0.
+  if (chapters.length > 0 && chapters[0].wordIndex > 0) {
+    chapters.unshift({
+      title: "Opening",
+      paragraphIndex: 0,
+      wordIndex: 0,
+      wordCount: 0,
+      pageIndex: 0,
+    });
+  }
+
+  // Split oversized chapters into readable parts (~3000 words each) so a
+  // book whose headings are sparse still navigates in digestible chunks.
+  const MAX_CHAPTER_WORDS = 4500;
+  const PART_WORDS = 3000;
+  const expanded: Chapter[] = [];
+  chapters.forEach((chapter, ci) => {
+    const endParagraph =
+      ci + 1 < chapters.length ? chapters[ci + 1].paragraphIndex : paragraphs.length;
+    const endWord =
+      ci + 1 < chapters.length ? chapters[ci + 1].wordIndex : totalWords;
+    const size = endWord - chapter.wordIndex;
+
+    if (size <= MAX_CHAPTER_WORDS) {
+      expanded.push(chapter);
+      return;
+    }
+
+    // Collect part-start paragraphs every ~PART_WORDS.
+    const partStarts: number[] = [chapter.paragraphIndex];
+    let lastStartWord = chapter.wordIndex;
+    for (let p = chapter.paragraphIndex + 1; p < endParagraph; p++) {
+      if (paragraphWordStart[p] - lastStartWord >= PART_WORDS) {
+        partStarts.push(p);
+        lastStartWord = paragraphWordStart[p];
+      }
+    }
+    partStarts.forEach((startParagraph, partIdx) => {
+      expanded.push({
+        title:
+          partStarts.length > 1
+            ? `${chapter.title} — part ${partIdx + 1} of ${partStarts.length}`
+            : chapter.title,
+        paragraphIndex: startParagraph,
+        wordIndex: paragraphWordStart[startParagraph],
+        wordCount: 0,
+        pageIndex: Math.floor(startParagraph / PARAGRAPHS_PER_PAGE),
+      });
+    });
+  });
+  chapters = expanded;
+
   // Fill word counts from the next chapter's start.
   chapters.forEach((chapter, i) => {
     const end = i + 1 < chapters.length ? chapters[i + 1].wordIndex : totalWords;

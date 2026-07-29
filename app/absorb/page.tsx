@@ -92,8 +92,9 @@ function AbsorbFlow() {
     stage.name === "upload" ? 0 : stage.name === "sprint" ? 1 : stage.name === "recall" ? 2 : 3;
 
   // ---- Stage 1 -> 2: sprint metrics + comprehension quiz -------------------
-  const persistSprint = useCallback(async (book: Book, metrics: RSVPMetrics) => {
-    const startWord = book.last_word_index ?? 0;
+  const persistSprint = useCallback(
+    async (book: Book, metrics: RSVPMetrics, sprintStartWord: number) => {
+    const startWord = sprintStartWord;
     const endWord = startWord + metrics.wordsConsumed;
     let sessionId: string | null = null;
     try {
@@ -123,7 +124,9 @@ function AbsorbFlow() {
       setPersistError(err instanceof Error ? err.message : "Failed to save sprint");
     }
     setQuiz({ bookId: book.id, startWord, endWord, sessionId });
-  }, []);
+    },
+    []
+  );
 
   // ---- Resume position persistence ----------------------------------------
   const saveProgress = useCallback(
@@ -314,7 +317,9 @@ function AbsorbFlow() {
           </button>
           <SprintReader
             book={stage.book}
-            onSprintComplete={(metrics) => void persistSprint(stage.book, metrics)}
+            onSprintComplete={(metrics, sprintStartWord) =>
+              void persistSprint(stage.book, metrics, sprintStartWord)
+            }
             onFinishBook={() => setStage({ name: "recall", book: stage.book })}
             onProgress={(progress) => saveProgress(stage.book, progress)}
             onQuizRange={(startWord, endWord) =>
