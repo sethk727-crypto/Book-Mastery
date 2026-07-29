@@ -19,6 +19,7 @@ import {
   Play,
   Plus,
   RotateCcw,
+  Sunrise,
   Timer,
   TrendingUp,
   Type,
@@ -145,6 +146,67 @@ function auroraThemeAt(frameIndex: number): WordTheme {
     wordClass: "",
     orpClass: "",
   };
+}
+
+// ---------------------------------------------------------------------------
+// Sky scenes — atmospheric backdrops built from the brand palette
+// (sunrise → midnight). Used behind the word inline and in fullscreen.
+// ---------------------------------------------------------------------------
+
+export type SceneKey = "midnight" | "dawn" | "day" | "sunset" | "night";
+
+interface Scene {
+  label: string;
+  background: string;
+  /** Color of the soft ambient glow that breathes behind the word. */
+  glow: string;
+}
+
+export const SCENES: Record<SceneKey, Scene> = {
+  midnight: {
+    label: "Midnight",
+    background: "radial-gradient(120% 90% at 50% 115%, #1C2541 0%, #0B132B 65%)",
+    glow: "#1D2D50",
+  },
+  dawn: {
+    label: "Dawn",
+    background:
+      "linear-gradient(180deg, #0B132B 0%, #1D2D50 30%, #7B2CBF 56%, #FF8A65 82%, #FFC857 100%)",
+    glow: "#FFC857",
+  },
+  day: {
+    label: "Clear sky",
+    background:
+      "linear-gradient(180deg, #1D2D50 0%, #3A86FF 55%, #87CEEB 85%, #DCEEFA 100%)",
+    glow: "#DCEEFA",
+  },
+  sunset: {
+    label: "Sunset",
+    background:
+      "linear-gradient(180deg, #0B132B 0%, #1C2541 26%, #7B2CBF 50%, #D9381E 76%, #F06543 92%, #FFC857 100%)",
+    glow: "#F06543",
+  },
+  night: {
+    label: "Night",
+    background: "linear-gradient(180deg, #0B132B 0%, #1D2D50 55%, #1C2541 100%)",
+    glow: "#E2C0FF",
+  },
+};
+
+const SCENE_ORDER: SceneKey[] = ["midnight", "dawn", "day", "sunset", "night"];
+
+/** Slow breathing glow low in the sky — the scene's "light source". */
+function SceneGlow({ scene }: { scene: Scene }) {
+  return (
+    <motion.div
+      className="pointer-events-none absolute inset-0"
+      style={{
+        background: `radial-gradient(55% 42% at 50% 80%, ${scene.glow}55 0%, transparent 70%)`,
+      }}
+      animate={{ opacity: [0.35, 0.75, 0.35] }}
+      transition={{ duration: 9, repeat: Infinity, ease: "easeInOut" }}
+    />
+  );
 }
 
 /** Renders a frame with its ORP character fixed at the horizontal center. */
@@ -317,6 +379,29 @@ export default function RSVPReader({
     });
   }, []);
 
+  // ---- Sky scene (persisted) -----------------------------------------------
+  const [sceneKey, setSceneKey] = useState<SceneKey>("midnight");
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("rsvp:scene") as SceneKey | null;
+      if (saved && SCENES[saved]) setSceneKey(saved);
+    } catch {
+      // defaults stand
+    }
+  }, []);
+  const cycleScene = useCallback(() => {
+    setSceneKey((prev) => {
+      const next = SCENE_ORDER[(SCENE_ORDER.indexOf(prev) + 1) % SCENE_ORDER.length];
+      try {
+        localStorage.setItem("rsvp:scene", next);
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+  const scene = SCENES[sceneKey];
+
   const theme =
     themeKey === "aurora" ? auroraThemeAt(tokenIndex) : WORD_THEMES[themeKey];
 
@@ -393,9 +478,11 @@ export default function RSVPReader({
         className={fsMode === "overlay" ? "fixed inset-0 z-[100]" : "h-full w-full"}
       >
         <div
-          className="relative flex h-full w-full cursor-pointer flex-col items-center justify-center bg-black"
+          className="relative flex h-full w-full cursor-pointer flex-col items-center justify-center overflow-hidden"
+          style={{ background: scene.background }}
           onClick={toggle}
         >
+          <SceneGlow scene={scene} />
           {/* Exit — top left (touch-friendly; phones have no Esc key) */}
           <button
             onClick={(e) => {
@@ -470,6 +557,14 @@ export default function RSVPReader({
               <Palette size={16} />
             </button>
             <button
+              onClick={cycleScene}
+              className="rounded-lg bg-neutral-900 p-2.5 text-neutral-500 transition hover:text-white"
+              aria-label="Change sky scene"
+              title={`Scene: ${scene.label}`}
+            >
+              <Sunrise size={16} />
+            </button>
+            <button
               onClick={toggleShake}
               className={`rounded-lg bg-neutral-900 p-2.5 transition hover:text-white ${
                 shake ? "text-accent-soft" : "text-neutral-500"
@@ -514,7 +609,11 @@ export default function RSVPReader({
       className="mx-auto flex w-full max-w-3xl flex-col gap-6 rounded-2xl bg-surface-raised p-6 shadow-xl"
     >
       {/* ------------------------------------------------ Focal box */}
-      <div className="relative overflow-hidden rounded-xl border border-neutral-800 bg-surface px-6 py-14">
+      <div
+        className="relative overflow-hidden rounded-xl border border-neutral-800 px-6 py-14"
+        style={{ background: scene.background }}
+      >
+        <SceneGlow scene={scene} />
         {/* Fixation guides above/below the ORP center line */}
         <div className="pointer-events-none absolute left-1/2 top-3 h-4 w-px -translate-x-1/2 bg-orp/70" />
         <div className="pointer-events-none absolute bottom-3 left-1/2 h-4 w-px -translate-x-1/2 bg-orp/70" />
@@ -653,6 +752,14 @@ export default function RSVPReader({
             title={`Theme: ${theme.label} (click to cycle)`}
           >
             <Palette size={14} />
+          </button>
+          <button
+            onClick={cycleScene}
+            className="rounded-md bg-surface-overlay p-1.5 text-neutral-400 transition hover:text-white"
+            aria-label="Change sky scene"
+            title={`Scene: ${scene.label} (click to cycle)`}
+          >
+            <Sunrise size={14} />
           </button>
           <button
             onClick={toggleShake}

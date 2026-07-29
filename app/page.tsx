@@ -363,7 +363,9 @@ export default function Home() {
   return (
     <main className="mx-auto min-h-screen max-w-5xl px-4 py-10">
       <header className="mb-8 text-center">
-        <h1 className="text-2xl font-bold text-white">NeuroAbsorption Engine</h1>
+        <h1 className="bg-gradient-to-r from-atmos-dawnGold via-atmos-coral to-atmos-twilight bg-clip-text text-2xl font-bold text-transparent">
+          NeuroAbsorption Engine
+        </h1>
         <p className="mt-1 text-sm text-neutral-400">
           Read fast → rewrite the schema → install the doctrine.
         </p>

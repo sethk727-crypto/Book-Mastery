@@ -20,6 +20,21 @@ const config: Config = {
           soft: "#818cf8",
         },
         orp: "#ef4444",
+        // Atmospheric brand palette — sunrise to midnight.
+        atmos: {
+          dawnGold: "#FFC857",
+          coral: "#FF8A65",
+          lavender: "#E2C0FF",
+          azure: "#3A86FF",
+          skyClassic: "#87CEEB",
+          mist: "#DCEEFA",
+          amber: "#F06543",
+          crimson: "#D9381E",
+          twilight: "#7B2CBF",
+          indigo: "#1D2D50",
+          midnight: "#0B132B",
+          slate: "#1C2541",
+        },
       },
       fontFamily: {
         reader: ["Georgia", "ui-serif", "serif"],
