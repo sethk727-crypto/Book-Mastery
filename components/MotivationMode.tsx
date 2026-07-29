@@ -79,35 +79,35 @@ export default function MotivationMode() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const loadImages = useCallback(async () => {
+  const getToken = useCallback(async (): Promise<string | null> => {
     try {
-      const supabase = getSupabase();
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
-        setSignedIn(false);
-        return;
-      }
-      setSignedIn(true);
-      const { data: files } = await supabase.storage.from("motivation").list(user.id, {
-        limit: 50,
-        sortBy: { column: "created_at", order: "asc" },
-      });
-      const list = (files ?? [])
-        .filter((f) => f.name && !f.name.startsWith("."))
-        .map((f) => {
-          const path = `${user.id}/${f.name}`;
-          return {
-            path,
-            url: supabase.storage.from("motivation").getPublicUrl(path).data.publicUrl,
-          };
-        });
-      setImages(list);
+        data: { session },
+      } = await getSupabase().auth.getSession();
+      return session?.access_token ?? null;
     } catch {
-      setSignedIn(false);
+      return null;
     }
   }, []);
+
+  const loadImages = useCallback(async () => {
+    const token = await getToken();
+    if (!token) {
+      setSignedIn(false);
+      return;
+    }
+    setSignedIn(true);
+    try {
+      const res = await fetch("/api/vision", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const payload = (await res.json()) as { images?: VisionImage[]; error?: string };
+      if (!res.ok) throw new Error(payload.error ?? "Could not load images");
+      setImages(payload.images ?? []);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Could not load images");
+    }
+  }, [getToken]);
 
   useEffect(() => {
     void loadImages();
@@ -118,44 +118,49 @@ export default function MotivationMode() {
       setUploading(true);
       setUploadError(null);
       try {
-        const supabase = getSupabase();
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!user) throw new Error("Sign in first to save your vision images.");
+        const token = await getToken();
+        if (!token) throw new Error("Sign in first to save your vision images.");
+        const form = new FormData();
         for (const file of Array.from(fileList).slice(0, 20)) {
-          const ext = file.name.split(".").pop()?.toLowerCase() ?? "jpg";
-          const { error } = await supabase.storage
-            .from("motivation")
-            .upload(`${user.id}/${crypto.randomUUID()}.${ext}`, file, {
-              contentType: file.type || "image/jpeg",
-            });
-          if (error) throw new Error(error.message);
+          form.append("files", file);
         }
-        await loadImages();
+        const res = await fetch("/api/vision", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+        });
+        const payload = (await res.json()) as { images?: VisionImage[]; error?: string };
+        if (!res.ok) throw new Error(payload.error ?? "Upload failed");
+        setImages(payload.images ?? []);
       } catch (err) {
-        setUploadError(
-          err instanceof Error
-            ? err.message
-            : "Upload failed — did you run migration-003.sql?"
-        );
+        setUploadError(err instanceof Error ? err.message : "Upload failed");
       } finally {
         setUploading(false);
       }
     },
-    [loadImages]
+    [getToken]
   );
 
   const deleteImage = useCallback(
     async (path: string) => {
       try {
-        await getSupabase().storage.from("motivation").remove([path]);
-        setImages((prev) => prev.filter((img) => img.path !== path));
+        const token = await getToken();
+        if (!token) return;
+        const res = await fetch("/api/vision", {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ path }),
+        });
+        const payload = (await res.json()) as { images?: VisionImage[] };
+        if (res.ok) setImages(payload.images ?? []);
       } catch {
         // ignore
       }
     },
-    []
+    [getToken]
   );
 
   // ---- Backdrop + quote rotation ------------------------------------------
@@ -167,12 +172,24 @@ export default function MotivationMode() {
   const [quoteIndex, setQuoteIndex] = useState(0);
   const backdropCount = backdrops.length;
 
+  // Start on a random image each session.
+  useEffect(() => {
+    if (backdropCount > 1) {
+      setBgIndex(Math.floor(Math.random() * backdropCount));
+    }
+  }, [backdropCount]);
+
   useEffect(() => {
     if (!isPlaying) return;
-    const imageTimer = setInterval(
-      () => setBgIndex((i) => (i + 1) % Math.max(1, backdropCount)),
-      IMAGE_ROTATE_MS
-    );
+    const imageTimer = setInterval(() => {
+      // Randomized rotation — always a different image than the current one.
+      setBgIndex((current) => {
+        if (backdropCount <= 1) return current;
+        let next = Math.floor(Math.random() * backdropCount);
+        if (next === current) next = (next + 1) % backdropCount;
+        return next;
+      });
+    }, IMAGE_ROTATE_MS);
     const quoteTimer = setInterval(
       () => setQuoteIndex((i) => (i + 1) % MOTIVATION_QUOTES.length),
       QUOTE_ROTATE_MS
@@ -436,7 +453,12 @@ export default function MotivationMode() {
             />
             {!signedIn && (
               <span className="text-xs text-amber-400">
-                Sign in to upload more — your starter set is loaded meanwhile.
+                Sign in to upload your own — the starter set plays meanwhile.
+              </span>
+            )}
+            {signedIn && images.length === 0 && !uploading && (
+              <span className="text-xs text-neutral-500">
+                No uploads yet — showing the starter set.
               </span>
             )}
             {uploadError && <span className="text-xs text-red-400">{uploadError}</span>}
