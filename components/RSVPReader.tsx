@@ -44,7 +44,7 @@ export interface RSVPReaderProps {
 // Word themes — glow presets in the spirit of kinetic-typography titles.
 // ---------------------------------------------------------------------------
 
-export type WordThemeKey = "classic" | "gold" | "neon" | "violet" | "ember";
+export type WordThemeKey = "classic" | "aurora" | "gold" | "neon" | "violet" | "ember";
 
 interface WordTheme {
   label: string;
@@ -65,6 +65,13 @@ export const WORD_THEMES: Record<WordThemeKey, WordTheme> = {
     fontClass: "font-reader tracking-wide",
     wordClass: "text-neutral-100",
     orpClass: "font-bold text-orp",
+  },
+  aurora: {
+    // Placeholder — the live color is computed per frame in auroraThemeAt().
+    label: "Aurora (cycling)",
+    fontClass: "font-sans font-extrabold tracking-tight",
+    wordClass: "",
+    orpClass: "",
   },
   gold: {
     label: "Gold glow",
@@ -100,7 +107,45 @@ export const WORD_THEMES: Record<WordThemeKey, WordTheme> = {
   },
 };
 
-const THEME_ORDER: WordThemeKey[] = ["classic", "gold", "neon", "violet", "ember"];
+const THEME_ORDER: WordThemeKey[] = [
+  "classic",
+  "aurora",
+  "gold",
+  "neon",
+  "violet",
+  "ember",
+];
+
+// Aurora: drift through a warm-to-cool palette, changing every few words.
+const AURORA_COLORS = [
+  "#fde047", // gold
+  "#6ee7b7", // mint
+  "#67e8f9", // cyan
+  "#93c5fd", // sky
+  "#c4b5fd", // violet
+  "#f9a8d4", // pink
+  "#fdba74", // amber
+];
+const AURORA_HOLD_FRAMES = 5; // frames per color before drifting to the next
+
+function auroraThemeAt(frameIndex: number): WordTheme {
+  const color =
+    AURORA_COLORS[
+      Math.floor(frameIndex / AURORA_HOLD_FRAMES) % AURORA_COLORS.length
+    ];
+  return {
+    label: "Aurora (cycling)",
+    fontClass: "font-sans font-extrabold tracking-tight",
+    wordStyle: {
+      color,
+      textShadow: glow(color),
+      transition: "color 0.3s ease, text-shadow 0.3s ease",
+    },
+    orpStyle: { color: "#ffffff", textShadow: glow(color) },
+    wordClass: "",
+    orpClass: "",
+  };
+}
 
 /** Renders a frame with its ORP character fixed at the horizontal center. */
 function ORPWord({
@@ -167,6 +212,7 @@ export default function RSVPReader({
 
   const {
     token,
+    tokenIndex,
     progress,
     isPlaying,
     isComplete,
@@ -271,10 +317,24 @@ export default function RSVPReader({
     });
   }, []);
 
-  const theme = WORD_THEMES[themeKey];
+  const theme =
+    themeKey === "aurora" ? auroraThemeAt(tokenIndex) : WORD_THEMES[themeKey];
+
+  // Focus emphasis: sentence-enders, paragraph breaks, and long/rare words
+  // land slightly larger so the eye registers them as landmarks.
+  const emphasized = Boolean(
+    token &&
+      (token.delayMultiplier >= 2 ||
+        token.text.replace(/[^A-Za-z'’]/g, "").length >= 9)
+  );
+
   // Micro-shake: a tiny 2px jolt as each new word lands.
-  const wordAnimate = shake ? { opacity: 1, x: [2, -2, 1, 0] } : { opacity: 1, x: 0 };
-  const wordTransition = { duration: shake ? 0.12 : 0.04 };
+  const wordAnimate = {
+    opacity: 1,
+    scale: emphasized ? 1.12 : 1,
+    x: shake ? [2, -2, 1, 0] : 0,
+  };
+  const wordTransition = { duration: shake ? 0.12 : 0.06 };
 
   // Overlay mode: lock page scroll behind the overlay and exit on Escape.
   useEffect(() => {
