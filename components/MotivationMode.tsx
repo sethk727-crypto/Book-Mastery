@@ -9,6 +9,7 @@
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Flame,
@@ -206,7 +207,9 @@ export default function MotivationMode() {
   const canvas = (
     <div
       className={`relative cursor-pointer overflow-hidden bg-atmos-midnight ${
-        isFullscreen ? "fixed inset-0 z-[100]" : "h-[70vh] min-h-[420px] rounded-2xl border border-neutral-800"
+        isFullscreen
+          ? "fixed inset-0 z-[9999] h-[100dvh] w-screen"
+          : "h-[70vh] min-h-[420px] rounded-2xl border border-neutral-800"
       }`}
       onClick={toggle}
     >
@@ -330,6 +333,12 @@ export default function MotivationMode() {
       )}
     </div>
   );
+
+  // Fullscreen: portal the canvas onto <body> so no page layout, transform,
+  // or stacking context can trap or clip it. Escape/minimize still exit.
+  if (isFullscreen && typeof document !== "undefined") {
+    return createPortal(canvas, document.body);
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
