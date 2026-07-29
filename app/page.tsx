@@ -8,13 +8,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { BookOpenText, BookUp2, Brain, Sun, Target, Trophy } from "lucide-react";
+import { BookOpenText, BookUp2, Brain, Flame, Sun, Target, Trophy } from "lucide-react";
 import RSVPReader from "@/components/RSVPReader";
 import ReconsolidationStudio from "@/components/ReconsolidationStudio";
 import RewriteWizard, { type RewriteDraft } from "@/components/RewriteWizard";
 import DoctrineQueue from "@/components/DoctrineQueue";
 import DailyLiturgy from "@/components/DailyLiturgy";
 import ProgressHub from "@/components/ProgressHub";
+import MotivationMode from "@/components/MotivationMode";
 import { getSupabase } from "@/lib/supabase";
 import type {
   DoctrineRule,
@@ -125,7 +126,13 @@ const SAMPLE_HABIT_LOGS: HabitLog[] = [
   // day 7 was a single miss — tolerated, streak holds
 ];
 
-type Tab = "rsvp" | "reconsolidation" | "doctrine" | "liturgy" | "progress";
+type Tab =
+  | "rsvp"
+  | "reconsolidation"
+  | "doctrine"
+  | "liturgy"
+  | "progress"
+  | "motivation";
 
 const TABS: Array<{ id: Tab; label: string; icon: typeof Brain }> = [
   { id: "rsvp", label: "RSVP Reader", icon: BookOpenText },
@@ -133,6 +140,7 @@ const TABS: Array<{ id: Tab; label: string; icon: typeof Brain }> = [
   { id: "doctrine", label: "Living Doctrine", icon: Target },
   { id: "liturgy", label: "Daily Liturgy", icon: Sun },
   { id: "progress", label: "Progress", icon: Trophy },
+  { id: "motivation", label: "Motivation", icon: Flame },
 ];
 
 type DataMode = "loading" | "demo" | "live";
@@ -510,6 +518,8 @@ export default function Home() {
       )}
 
       {tab === "progress" && <ProgressHub />}
+
+      {tab === "motivation" && <MotivationMode />}
 
       {tab === "liturgy" && (
         <DailyLiturgy
