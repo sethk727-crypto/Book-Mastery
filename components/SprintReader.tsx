@@ -48,8 +48,8 @@ function BionicText({ text }: { text: string }) {
 
 export interface SprintReaderProps {
   book: Book;
-  /** Persist sprint metrics from RSVP flow mode. */
-  onSprintComplete?: (metrics: RSVPMetrics) => void;
+  /** Sprint finished: metrics plus the absolute word the sprint started at. */
+  onSprintComplete?: (metrics: RSVPMetrics, sprintStartWord: number) => void;
   /** "Finish Book" pressed — lock the PDF and open the Recall Chamber. */
   onFinishBook: () => void;
   /** Persist reading position (page turns / RSVP pauses) for resume. */
@@ -249,7 +249,7 @@ export default function SprintReader({
             text={book.extracted_text}
             initialWPM={350}
             startWordIndex={rsvpStartWord}
-            onSprintComplete={onSprintComplete}
+            onSprintComplete={(metrics) => onSprintComplete?.(metrics, rsvpStartWord)}
             onPositionChange={(wordIndex) => {
               setLastKnownWord(wordIndex);
               onProgress?.({ wordIndex });

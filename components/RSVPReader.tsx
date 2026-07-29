@@ -14,6 +14,7 @@ import {
   Maximize2,
   Minimize2,
   Minus,
+  Palette,
   Pause,
   Play,
   Plus,
@@ -21,6 +22,7 @@ import {
   Timer,
   TrendingUp,
   Type,
+  Vibrate,
 } from "lucide-react";
 import { useRSVPReader } from "@/hooks/useRSVPReader";
 import { MAX_WPM, MIN_WPM, WPM_STEP } from "@/lib/rsvp";
@@ -38,15 +40,79 @@ export interface RSVPReaderProps {
   onPositionChange?: (wordIndex: number) => void;
 }
 
+// ---------------------------------------------------------------------------
+// Word themes — glow presets in the spirit of kinetic-typography titles.
+// ---------------------------------------------------------------------------
+
+export type WordThemeKey = "classic" | "gold" | "neon" | "violet" | "ember";
+
+interface WordTheme {
+  label: string;
+  fontClass: string;
+  wordStyle?: React.CSSProperties;
+  orpStyle?: React.CSSProperties;
+  wordClass: string;
+  orpClass: string;
+}
+
+function glow(color: string): string {
+  return `0 0 14px ${color}88, 0 0 42px ${color}55, 0 0 90px ${color}2e`;
+}
+
+export const WORD_THEMES: Record<WordThemeKey, WordTheme> = {
+  classic: {
+    label: "Classic",
+    fontClass: "font-reader tracking-wide",
+    wordClass: "text-neutral-100",
+    orpClass: "font-bold text-orp",
+  },
+  gold: {
+    label: "Gold glow",
+    fontClass: "font-sans font-extrabold tracking-tight",
+    wordStyle: { color: "#fde047", textShadow: glow("#facc15") },
+    orpStyle: { color: "#ffffff", textShadow: glow("#facc15") },
+    wordClass: "",
+    orpClass: "",
+  },
+  neon: {
+    label: "Neon cyan",
+    fontClass: "font-sans font-extrabold tracking-tight",
+    wordStyle: { color: "#67e8f9", textShadow: glow("#22d3ee") },
+    orpStyle: { color: "#ffffff", textShadow: glow("#22d3ee") },
+    wordClass: "",
+    orpClass: "",
+  },
+  violet: {
+    label: "Violet glow",
+    fontClass: "font-sans font-extrabold tracking-tight",
+    wordStyle: { color: "#c4b5fd", textShadow: glow("#8b5cf6") },
+    orpStyle: { color: "#ffffff", textShadow: glow("#8b5cf6") },
+    wordClass: "",
+    orpClass: "",
+  },
+  ember: {
+    label: "Ember",
+    fontClass: "font-sans font-extrabold tracking-tight",
+    wordStyle: { color: "#fdba74", textShadow: glow("#f97316") },
+    orpStyle: { color: "#ffffff", textShadow: glow("#f97316") },
+    wordClass: "",
+    orpClass: "",
+  },
+};
+
+const THEME_ORDER: WordThemeKey[] = ["classic", "gold", "neon", "violet", "ember"];
+
 /** Renders a frame with its ORP character fixed at the horizontal center. */
 function ORPWord({
   text,
   orpIndex,
   sizeClass = "text-5xl",
+  theme,
 }: {
   text: string;
   orpIndex: number;
   sizeClass?: string;
+  theme: WordTheme;
 }) {
   const before = text.slice(0, orpIndex);
   const orp = text[orpIndex] ?? "";
@@ -55,10 +121,19 @@ function ORPWord({
   // Two flex-1 halves keep the ORP glyph pinned to the visual center
   // regardless of how long the pre/post segments are.
   return (
-    <div className={`flex w-full items-baseline font-reader tracking-wide ${sizeClass}`}>
-      <span className="flex-1 text-right text-neutral-100">{before}</span>
-      <span className="px-[1px] font-bold text-orp">{orp}</span>
-      <span className="flex-1 text-left text-neutral-100">{after}</span>
+    <div className={`flex w-full items-baseline ${theme.fontClass} ${sizeClass}`}>
+      <span
+        className={`flex-1 text-right ${theme.wordClass}`}
+        style={theme.wordStyle}
+      >
+        {before}
+      </span>
+      <span className={`px-[1px] ${theme.orpClass}`} style={theme.orpStyle}>
+        {orp}
+      </span>
+      <span className={`flex-1 text-left ${theme.wordClass}`} style={theme.wordStyle}>
+        {after}
+      </span>
     </div>
   );
 }
@@ -159,6 +234,48 @@ export default function RSVPReader({
     })();
   }, [fsMode]);
 
+  // ---- Word style: glow theme + micro-shake (persisted) --------------------
+  const [themeKey, setThemeKey] = useState<WordThemeKey>("classic");
+  const [shake, setShake] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("rsvp:theme") as WordThemeKey | null;
+      if (saved && WORD_THEMES[saved]) setThemeKey(saved);
+      setShake(localStorage.getItem("rsvp:shake") === "1");
+    } catch {
+      // storage blocked — defaults stand
+    }
+  }, []);
+
+  const cycleTheme = useCallback(() => {
+    setThemeKey((prev) => {
+      const next = THEME_ORDER[(THEME_ORDER.indexOf(prev) + 1) % THEME_ORDER.length];
+      try {
+        localStorage.setItem("rsvp:theme", next);
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleShake = useCallback(() => {
+    setShake((prev) => {
+      try {
+        localStorage.setItem("rsvp:shake", prev ? "0" : "1");
+      } catch {
+        // ignore
+      }
+      return !prev;
+    });
+  }, []);
+
+  const theme = WORD_THEMES[themeKey];
+  // Micro-shake: a tiny 2px jolt as each new word lands.
+  const wordAnimate = shake ? { opacity: 1, x: [2, -2, 1, 0] } : { opacity: 1, x: 0 };
+  const wordTransition = { duration: shake ? 0.12 : 0.04 };
+
   // Overlay mode: lock page scroll behind the overlay and exit on Escape.
   useEffect(() => {
     if (fsMode !== "overlay") return;
@@ -248,14 +365,15 @@ export default function RSVPReader({
                 <motion.div
                   key={`${token.startWordIndex}-${token.text}`}
                   initial={{ opacity: 0.15 }}
-                  animate={{ opacity: 1 }}
+                  animate={wordAnimate}
                   exit={{ opacity: 0 }}
-                  transition={{ duration: 0.04 }}
+                  transition={wordTransition}
                 >
                   <ORPWord
                     text={token.text}
                     orpIndex={token.orpIndex}
                     sizeClass="text-6xl md:text-7xl lg:text-8xl"
+                    theme={theme}
                   />
                 </motion.div>
               )}
@@ -278,11 +396,29 @@ export default function RSVPReader({
             space play · ↑ ↓ speed · ← → skip · F / esc exit
           </div>
 
-          {/* Touch speed controls — bottom right */}
+          {/* Touch controls — bottom right: theme, shake, speed */}
           <div
             className="absolute bottom-3 right-4 flex items-center gap-1.5"
             onClick={(e) => e.stopPropagation()}
           >
+            <button
+              onClick={cycleTheme}
+              className="rounded-lg bg-neutral-900 p-2.5 text-neutral-500 transition hover:text-white"
+              aria-label="Change word color theme"
+              title={`Theme: ${theme.label}`}
+            >
+              <Palette size={16} />
+            </button>
+            <button
+              onClick={toggleShake}
+              className={`rounded-lg bg-neutral-900 p-2.5 transition hover:text-white ${
+                shake ? "text-accent-soft" : "text-neutral-500"
+              }`}
+              aria-label="Toggle micro-shake"
+              title="Micro-shake"
+            >
+              <Vibrate size={16} />
+            </button>
             <button
               onClick={() => setWPM(wpm - WPM_STEP)}
               className="rounded-lg bg-neutral-900 p-2.5 text-neutral-500 transition hover:text-white"
@@ -328,11 +464,11 @@ export default function RSVPReader({
             <motion.div
               key={`${token.startWordIndex}-${token.text}`}
               initial={{ opacity: 0.15 }}
-              animate={{ opacity: 1 }}
+              animate={wordAnimate}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.04 }}
+              transition={wordTransition}
             >
-              <ORPWord text={token.text} orpIndex={token.orpIndex} />
+              <ORPWord text={token.text} orpIndex={token.orpIndex} theme={theme} />
             </motion.div>
           ) : (
             <p className="text-center text-neutral-500">No text loaded.</p>
@@ -449,6 +585,25 @@ export default function RSVPReader({
               {size}w
             </button>
           ))}
+          <span className="mx-1 h-4 w-px bg-neutral-800" />
+          <button
+            onClick={cycleTheme}
+            className="rounded-md bg-surface-overlay p-1.5 text-neutral-400 transition hover:text-white"
+            aria-label="Change word color theme"
+            title={`Theme: ${theme.label} (click to cycle)`}
+          >
+            <Palette size={14} />
+          </button>
+          <button
+            onClick={toggleShake}
+            className={`rounded-md bg-surface-overlay p-1.5 transition hover:text-white ${
+              shake ? "text-accent-soft" : "text-neutral-400"
+            }`}
+            aria-label="Toggle micro-shake"
+            title="Micro-shake on each word"
+          >
+            <Vibrate size={14} />
+          </button>
         </div>
       </div>
 
