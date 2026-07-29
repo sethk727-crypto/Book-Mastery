@@ -9,7 +9,6 @@
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Flame,
@@ -184,21 +183,72 @@ export default function MotivationMode() {
     };
   }, [isPlaying, backdropCount]);
 
-  // ---- Fullscreen (overlay — works everywhere incl. iOS) -------------------
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  // ---- Fullscreen: native API first (element stays in place — no remount),
+  // CSS overlay fallback where native is blocked (iPhone Safari). ----------
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [fsMode, setFsMode] = useState<"off" | "native" | "overlay">("off");
+  const isFullscreen = fsMode !== "off";
+
   useEffect(() => {
-    if (!isFullscreen) return;
+    const onChange = () => {
+      if (!document.fullscreenElement) {
+        setFsMode((m) => (m === "native" ? "off" : m));
+      }
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    void (async () => {
+      if (fsMode === "overlay") {
+        setFsMode("off");
+        return;
+      }
+      if (fsMode === "native") {
+        try {
+          await document.exitFullscreen();
+        } catch {
+          // listener syncs; force below
+        }
+        setFsMode("off");
+        return;
+      }
+      const el = canvasRef.current as
+        | (HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> })
+        | null;
+      try {
+        if (el?.requestFullscreen) {
+          await el.requestFullscreen();
+          setFsMode("native");
+          return;
+        }
+        if (el?.webkitRequestFullscreen) {
+          await el.webkitRequestFullscreen();
+          setFsMode("native");
+          return;
+        }
+      } catch {
+        // fall through to overlay
+      }
+      setFsMode("overlay");
+    })();
+  }, [fsMode]);
+
+  // Overlay mode: lock scroll behind it and exit on Escape.
+  useEffect(() => {
+    if (fsMode !== "overlay") return;
     const previous = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setIsFullscreen(false);
+      if (e.key === "Escape") setFsMode("off");
     };
     window.addEventListener("keydown", onKey);
     return () => {
       document.body.style.overflow = previous;
       window.removeEventListener("keydown", onKey);
     };
-  }, [isFullscreen]);
+  }, [fsMode]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentImage = backdrops[bgIndex % backdrops.length];
@@ -206,10 +256,13 @@ export default function MotivationMode() {
   // ---- The canvas ----------------------------------------------------------
   const canvas = (
     <div
+      ref={canvasRef}
       className={`relative cursor-pointer overflow-hidden bg-atmos-midnight ${
-        isFullscreen
-          ? "fixed inset-0 z-[9999] h-[100dvh] w-screen"
-          : "h-[70vh] min-h-[420px] rounded-2xl border border-neutral-800"
+        fsMode === "native"
+          ? "h-full w-full"
+          : fsMode === "overlay"
+            ? "fixed inset-0 z-[9999] h-[100dvh] w-screen"
+            : "h-[70vh] min-h-[420px] rounded-2xl border border-neutral-800"
       }`}
       onClick={toggle}
     >
@@ -310,7 +363,7 @@ export default function MotivationMode() {
           <Plus size={16} />
         </button>
         <button
-          onClick={() => setIsFullscreen((v) => !v)}
+          onClick={toggleFullscreen}
           className="rounded-lg bg-black/50 p-2.5 text-neutral-300 backdrop-blur transition hover:text-white"
           aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
         >
@@ -333,12 +386,6 @@ export default function MotivationMode() {
       )}
     </div>
   );
-
-  // Fullscreen: portal the canvas onto <body> so no page layout, transform,
-  // or stacking context can trap or clip it. Escape/minimize still exit.
-  if (isFullscreen && typeof document !== "undefined") {
-    return createPortal(canvas, document.body);
-  }
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
