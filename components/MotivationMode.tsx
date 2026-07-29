@@ -120,25 +120,50 @@ export default function MotivationMode() {
       try {
         const token = await getToken();
         if (!token) throw new Error("Sign in first to save your vision images.");
-        const form = new FormData();
-        for (const file of Array.from(fileList).slice(0, 20)) {
-          form.append("files", file);
+
+        const files = Array.from(fileList).slice(0, 20);
+        const oversized = files.find((f) => f.size > 10 * 1024 * 1024);
+        if (oversized) {
+          throw new Error(`"${oversized.name}" is over 10 MB — resize it and retry.`);
         }
+
+        // 1. Ask the server for one-time signed upload slots.
         const res = await fetch("/api/vision", {
           method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-          body: form,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            files: files.map((f) => ({ name: f.name, type: f.type })),
+          }),
         });
-        const payload = (await res.json()) as { images?: VisionImage[]; error?: string };
-        if (!res.ok) throw new Error(payload.error ?? "Upload failed");
-        setImages(payload.images ?? []);
+        const payload = (await res.json()) as {
+          uploads?: Array<{ path: string; token: string }>;
+          error?: string;
+        };
+        if (!res.ok || !payload.uploads) {
+          throw new Error(payload.error ?? "Upload failed");
+        }
+
+        // 2. Send the bytes straight from the browser to storage.
+        const storage = getSupabase().storage.from("motivation");
+        for (let i = 0; i < payload.uploads.length; i++) {
+          const { path, token: uploadToken } = payload.uploads[i];
+          const { error } = await storage.uploadToSignedUrl(path, uploadToken, files[i], {
+            contentType: files[i].type || "image/jpeg",
+          });
+          if (error) throw new Error(`${files[i].name}: ${error.message}`);
+        }
+
+        await loadImages();
       } catch (err) {
         setUploadError(err instanceof Error ? err.message : "Upload failed");
       } finally {
         setUploading(false);
       }
     },
-    [getToken]
+    [getToken, loadImages]
   );
 
   const deleteImage = useCallback(

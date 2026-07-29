@@ -70,6 +70,12 @@ export async function GET(req: NextRequest) {
   }
 }
 
+/**
+ * POST issues signed one-time upload URLs; the browser then uploads the
+ * image bytes DIRECTLY to Supabase Storage. This avoids the platform's
+ * request-body size cap that a multipart upload through the server hits.
+ * Body: { files: [{ name, type }] } -> { uploads: [{ path, token }] }
+ */
 export async function POST(req: NextRequest) {
   const user = await authUser(req);
   if (!user) return NextResponse.json({ error: "Sign in first" }, { status: 401 });
@@ -77,30 +83,28 @@ export async function POST(req: NextRequest) {
     const admin = getSupabaseAdmin();
     await ensureBucket(admin);
 
-    const form = await req.formData();
-    const files = form.getAll("files").filter((f): f is File => f instanceof File);
-    if (files.length === 0) {
-      return NextResponse.json({ error: "No files received" }, { status: 400 });
+    const body = (await req.json()) as {
+      files?: Array<{ name?: string; type?: string }>;
+    };
+    const metas = body.files ?? [];
+    if (metas.length === 0) {
+      return NextResponse.json({ error: "No files listed" }, { status: 400 });
     }
 
-    for (const file of files.slice(0, 20)) {
-      if (file.size > MAX_FILE_BYTES) {
-        return NextResponse.json(
-          { error: `"${file.name}" is over 10 MB — resize it and try again.` },
-          { status: 413 }
-        );
-      }
-      const ext = (file.name.split(".").pop() ?? "jpg").toLowerCase().slice(0, 5);
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const { error } = await admin.storage
+    const uploads: Array<{ path: string; token: string }> = [];
+    for (const meta of metas.slice(0, 20)) {
+      const ext = (meta.name?.split(".").pop() ?? "jpg").toLowerCase().slice(0, 5);
+      const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
+      const { data, error } = await admin.storage
         .from(BUCKET)
-        .upload(`${user.id}/${crypto.randomUUID()}.${ext}`, buffer, {
-          contentType: file.type || "image/jpeg",
-        });
-      if (error) throw new Error(error.message);
+        .createSignedUploadUrl(path);
+      if (error || !data) {
+        throw new Error(error?.message ?? "Could not create upload URL");
+      }
+      uploads.push({ path, token: data.token });
     }
 
-    return NextResponse.json({ images: await listImages(admin, user.id) });
+    return NextResponse.json({ uploads });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Upload failed" },
