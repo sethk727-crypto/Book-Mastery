@@ -17,6 +17,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [configError, setConfigError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -37,7 +38,8 @@ export default function LoginPage() {
         }
       });
       return () => sub.subscription.unsubscribe();
-    } catch {
+    } catch (err) {
+      setConfigError(err instanceof Error ? err.message : null);
       setState("unconfigured");
     }
   }, []);
@@ -88,11 +90,15 @@ export default function LoginPage() {
           <div className="flex items-start gap-2 rounded-lg border border-amber-700/50 bg-amber-950/20 p-4 text-sm text-amber-200">
             <AlertTriangle size={16} className="mt-0.5 shrink-0" />
             <span>
-              The database isn&apos;t connected yet. Set{" "}
-              <code className="font-mono text-xs">NEXT_PUBLIC_SUPABASE_URL</code>{" "}
-              and{" "}
-              <code className="font-mono text-xs">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>{" "}
-              (see the README), then reload this page.
+              {configError ?? (
+                <>
+                  The database isn&apos;t connected yet. Set{" "}
+                  <code className="font-mono text-xs">NEXT_PUBLIC_SUPABASE_URL</code>{" "}
+                  and{" "}
+                  <code className="font-mono text-xs">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>{" "}
+                  (see the README), then reload this page.
+                </>
+              )}
             </span>
           </div>
         )}
